@@ -454,7 +454,8 @@ class Client(object):
 
     """
     def __init__(self, client_id="", clean_session=True, userdata=None,
-            protocol=MQTTv311, transport="tcp", get_auth_headers=None):
+            protocol=MQTTv311, transport="tcp", get_auth_headers=None,
+            tls_opts=None):
         """client_id is the unique client id string used when connecting to the
         broker. If client_id is zero length or None, then one will be randomly
         generated. In this case, clean_session must be True. If this is not the
@@ -485,8 +486,6 @@ class Client(object):
         """
         if not clean_session and (client_id == "" or client_id is None):
             raise ValueError('A client id must be provided if clean session is False.')
-
-        self._get_auth_headers = get_auth_headers
 
         self._transport = transport
         self._protocol = protocol
@@ -561,6 +560,11 @@ class Client(object):
         self._on_publish = None
         self._on_unsubscribe = None
         self._on_disconnect = None
+
+        self._get_auth_headers = get_auth_headers
+
+        if tls_opts:
+            self.tls_set(**tls_opts)
 
     def __del__(self):
         pass
