@@ -272,7 +272,6 @@ class MQTTMessageInfo:
     def __init__(self, mid):
         self.mid = mid
         self._published = False
-        self._condition = threading.Condition()
         self.rc = 0
         self._iterpos = 0
 
@@ -305,21 +304,17 @@ class MQTTMessageInfo:
             raise IndexError("index out of range")
 
     def _set_as_published(self):
-        with self._condition:
-            self._published = True
-            self._condition.notify()
+        self._published = True
 
     def wait_for_publish(self):
         """Block until the message associated with this object is published."""
-        with self._condition:
-            while not self._published:
-                self._condition.wait()
+        while self._published == False:
+            time.sleep(1)
 
     def is_published(self):
         """Returns True if the message associated with this object has been
         published, else returns False."""
-        with self._condition:
-            return self._published
+        return self._published
 
 
 class MQTTMessage:
