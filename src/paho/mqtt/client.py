@@ -1641,7 +1641,7 @@ class Client(object):
         return rc
 
     def _packet_read(self):
-        """ This gets called if pselect() indicates that there is network data
+        """ This gets called if select() indicates that there is network data
         available - ie. at least one byte.  What we do depends on what data we
         already have.
 
@@ -1658,6 +1658,7 @@ class Client(object):
         After all data is read, send to _mqtt_handle_packet() to deal with.
         Finally, free the memory and reset everything to starting conditions.
         """
+        logger.warning("Reading from socket")
         if self._in_packet['command'] == 0:
             try:
                 command = self._sock.recv(1)
@@ -1670,7 +1671,7 @@ class Client(object):
                 return 1
             else:
                 if len(command) == 0:
-                    logger.error("Command had length 0")
+                    logger.error("Tried to read a byte from socket, but got nothing")
                     return 1
                 command = struct.unpack("!B", command)
                 self._in_packet['command'] = command[0]
