@@ -1857,22 +1857,22 @@ class Client(object):
             return MQTT_ERR_SUCCESS
 
     def _send_pingreq(self):
-        logger.debug("Sending PINGREQ")
+        logger.debug("Queueing PINGREQ")
         rc = self._send_simple_command(PINGREQ)
         if rc == MQTT_ERR_SUCCESS:
             self._ping_t = time_func()
         return rc
 
     def _send_pingresp(self):
-        logger.debug("Sending PINGRESP")
+        logger.debug("Queueing PINGRESP")
         return self._send_simple_command(PINGRESP)
 
     def _send_puback(self, mid):
-        logger.debug("Sending PUBACK (Mid: "+str(mid)+")")
+        logger.debug("Queueing PUBACK (Mid: "+str(mid)+")")
         return self._send_command_with_mid(PUBACK, mid, False)
 
     def _send_pubcomp(self, mid):
-        logger.debug("Sending PUBCOMP (Mid: "+str(mid)+")")
+        logger.debug("Queueing PUBCOMP (Mid: "+str(mid)+")")
         return self._send_command_with_mid(PUBCOMP, mid, False)
 
     def _pack_remaining_length(self, packet, remaining_length):
@@ -1926,7 +1926,7 @@ class Client(object):
         packet.extend(struct.pack("!B", command))
         if payload is None:
             remaining_length = 2+len(utopic)
-            logger.debug("Sending PUBLISH (d"+str(dup)+", q"+str(qos)+", r"+str(int(retain))+", m"+str(mid)+", '"+topic+"' (NULL payload)")
+            logger.debug("Queueing PUBLISH (d"+str(dup)+", q"+str(qos)+", r"+str(int(retain))+", m"+str(mid)+", '"+topic+"' (NULL payload)")
         else:
             if isinstance(payload, str):
                 upayload = payload.encode('utf-8')
@@ -1938,7 +1938,7 @@ class Client(object):
                 payloadlen = len(upayload)
 
             remaining_length = 2+len(utopic) + payloadlen
-            logger.debug("Sending PUBLISH (d"+str(dup)+", q"+str(qos)+", r"+str(int(retain))+", m"+str(mid)+", '"+topic+"', ... ("+str(payloadlen)+" bytes)")
+            logger.debug("Queueing PUBLISH (d"+str(dup)+", q"+str(qos)+", r"+str(int(retain))+", m"+str(mid)+", '"+topic+"', ... ("+str(payloadlen)+" bytes)")
 
         if qos > 0:
             # For message id
@@ -1963,14 +1963,15 @@ class Client(object):
             else:
                 raise TypeError('payload must be a string, unicode or a bytearray.')
 
+        logger.debug("Queueing PUBLISH packet")
         return self._packet_queue(PUBLISH, packet, mid, qos, info)
 
     def _send_pubrec(self, mid):
-        logger.debug("Sending PUBREC (Mid: "+str(mid)+")")
+        logger.debug("Queueing PUBREC (Mid: "+str(mid)+")")
         return self._send_command_with_mid(PUBREC, mid, False)
 
     def _send_pubrel(self, mid, dup=False):
-        logger.debug("Sending PUBREL (Mid: "+str(mid)+")")
+        logger.debug("Queueing PUBREL (Mid: "+str(mid)+")")
         return self._send_command_with_mid(PUBREL|2, mid, dup)
 
     def _send_command_with_mid(self, command, mid, dup):
@@ -2038,6 +2039,7 @@ class Client(object):
                 self._pack_str16(packet, self._password)
 
         self._keepalive = keepalive
+        logger.debug("Queueing CONNECT packet")
         return self._packet_queue(command, packet, 0, 0)
 
     def _send_disconnect(self):
@@ -2057,6 +2059,7 @@ class Client(object):
         for t in topics:
             self._pack_str16(packet, t[0])
             packet.extend(struct.pack("B", t[1]))
+        logger.debug("Queueing SUBSCRIBE packet")
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _send_unsubscribe(self, dup, topics):
@@ -2072,6 +2075,7 @@ class Client(object):
         packet.extend(struct.pack("!H", local_mid))
         for t in topics:
             self._pack_str16(packet, t)
+        logger.debug("Queueing UNSUBSCRIBE packet")
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _message_retry_check_actual(self, messages, mutex):
