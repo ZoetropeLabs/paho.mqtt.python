@@ -826,13 +826,15 @@ class Client(object):
                 else:
                     ssl.match_hostname(self._ssl.getpeercert(), self._host)
 
+            self._ssl.do_handshake()
+
         if self._transport == "websockets":
             if self._tls_ca_certs is not None:
                 self._ssl = WebsocketWrapper(self._ssl, self._host, self._port,
                     True, self._get_auth_headers)
             else:
                 sock = WebsocketWrapper(sock, self._host, self._port, False,
-                    self._get_auth_headers)
+                    None)
 
         self._sock = sock
         if self._ssl:
