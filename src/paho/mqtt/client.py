@@ -1361,6 +1361,7 @@ class Client(object):
         return self._sock
 
     def has_ssl(self):
+        """ Return whether ssl is enabled for this connection """
         return self._tls_ca_certs is not None
 
     def loop_forever(self, timeout=1.0, max_packets=1, retry_first_connection=False):
