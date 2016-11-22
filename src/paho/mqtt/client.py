@@ -853,7 +853,7 @@ class Client(object):
 
         if self._transport == "websockets":
             self._sock = WebsocketWrapper(self._sock, self._host, self._port,
-                True, self._get_auth_headers)
+                self._get_auth_headers)
 
         self._sock = sock
         self._sock.setblocking(0)
@@ -2545,7 +2545,7 @@ class WebsocketWrapper:
     OPCODE_PING = 0x9
     OPCODE_PONG = 0xa
 
-    def __init__(self, socket, host, port, is_ssl, get_auth_headers):
+    def __init__(self, socket, host, port, get_auth_headers):
 
         self.connected = False
 
