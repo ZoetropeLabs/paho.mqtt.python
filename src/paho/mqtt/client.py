@@ -2717,8 +2717,6 @@ class WebsocketWrapper:
             header1 = self._buffered_read(1)
             header2 = self._buffered_read(1)
 
-            logger.debug((header1, header2))
-
             opcode = (header1[0] & 0x0f)
             maskbit = (header2[0] & 0x80) == 0x80
             lengthbits = (header2[0] & 0x7f)
