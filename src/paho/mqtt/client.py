@@ -2781,6 +2781,8 @@ class WebsocketWrapper:
 
     def _recv_impl(self, length):
 
+        payload = ""
+
         # try to decode websocket payload part from data
         try:
 
