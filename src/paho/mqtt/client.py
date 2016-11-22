@@ -2668,7 +2668,7 @@ class WebsocketWrapper:
             "\r\n",
         ]).encode("utf8")
 
-        logger.info("Connecting to websockets with headers:\n%s", header)
+        logger.debug("Connecting to websockets with headers:\n%s", header)
 
         if self._ssl:
             sent = self._socket.write(header)
