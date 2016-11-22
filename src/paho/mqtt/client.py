@@ -564,9 +564,8 @@ class Client(object):
         pass
 
     def reinitialise(self, client_id="", clean_session=True, userdata=None):
-        if self._sock:
-            self._sock.close()
-            self._sock = None
+        self.close_socket()
+
         if self._sockpairR:
             self._sockpairR.close()
             self._sockpairR = None
@@ -785,9 +784,7 @@ class Client(object):
         self._state_mutex.acquire()
         self._state = mqtt_cs_new
         self._state_mutex.release()
-        if self._sock:
-            self._sock.close()
-            self._sock = None
+        self.close_socket()
 
         # Put messages in progress in a valid state.
         self._messages_reconnect_reset()
@@ -1224,9 +1221,7 @@ class Client(object):
         if self._ping_t > 0 and now - self._ping_t >= self._keepalive:
             # client->ping_t != 0 means we are waiting for a pingresp.
             # This hasn't happened in the keepalive time so we should disconnect.
-            if self._sock:
-                self._sock.close()
-                self._sock = None
+            self.close_socket()
 
             self._callback_mutex.acquire()
             if self._state == mqtt_cs_disconnecting:
@@ -1326,6 +1321,14 @@ class Client(object):
     def has_ssl(self):
         """ Return whether ssl is enabled for this connection """
         return self._tls_ca_certs is not None
+
+    def close_socket(self):
+        """ Close socket - possibly ssl socket as well """
+
+        if self._sock:
+            self._sock.close()
+            self._sock = None
+            self._bare_sock = None
 
     def loop_forever(self, timeout=1.0, max_packets=1, retry_first_connection=False):
         """This function call loop() for you in an infinite blocking loop. It
@@ -1623,9 +1626,7 @@ class Client(object):
 
     def _loop_rc_handle(self, rc):
         if rc:
-            if self._sock:
-                self._sock.close()
-                self._sock = None
+            self.close_socket()
 
             self._state_mutex.acquire()
             if self._state == mqtt_cs_disconnecting:
@@ -1658,7 +1659,6 @@ class Client(object):
         After all data is read, send to _mqtt_handle_packet() to deal with.
         Finally, free the memory and reset everything to starting conditions.
         """
-        logger.warning("Reading from socket")
         if self._in_packet['command'] == 0:
             try:
                 command = self._sock.recv(1)
@@ -1791,9 +1791,7 @@ class Client(object):
                             self._in_callback = False
                         self._callback_mutex.release()
 
-                        if self._sock:
-                            self._sock.close()
-                            self._sock = None
+                        self.close_socket()
                         return MQTT_ERR_SUCCESS
 
                     self._out_packet_mutex.acquire()
@@ -1830,9 +1828,7 @@ class Client(object):
                 self._last_msg_in = now
                 self._msgtime_mutex.release()
             else:
-                if self._sock:
-                    self._sock.close()
-                    self._sock = None
+                self.close_socket()
 
                 if self._state == mqtt_cs_disconnecting:
                     rc = MQTT_ERR_SUCCESS
