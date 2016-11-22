@@ -2567,22 +2567,30 @@ class WebsocketWrapper:
         sec_websocket_key = uuid.uuid4().bytes
         sec_websocket_key = base64.b64encode(sec_websocket_key)
 
-        if get_auth_headers:
-            header = get_auth_headers()
-        else:
-            header = "GET /mqtt HTTP/1.1\r\n" +\
-                     "Upgrade: websocket\r\n" +\
-                     "Connection: Upgrade\r\n" +\
-                     "Host: {self._host:s}:{self._port:s}\r\n" +\
-                     "Origin: http://{self._host:s}:{self._port:s}\r\n" +\
-                     "Sec-WebSocket-Key: {sec_websocket_key:s}\r\n" +\
-                     "Sec-WebSocket-Version: 13\r\n" +\
-                     "Sec-WebSocket-Protocol: mqtt\r\n\r\n".format(self=self,
-                         sec_websocket_key=sec_websocket_key)
+        websocket_headers = {
+            "Host": "{self._host:s}:{self._port:d}".format(self=self),
+            "Upgrade": "websocket",
+            "Connection": "Upgrade",
+            "Origin": "https://{self._host:s}:{self._port:d}".format(self=self),
+            "Sec-WebSocket-Key": sec_websocket_key,
+            "Sec-Websocket-Version": "13",
+            "Sec-Websocket-Protocol": "mqtt",
+        }
 
-        header = header.encode("utf8")
+        if get_auth_headers:
+            websocket_headers = get_auth_headers(websocket_headers)
+
+        header = "\r\n".join([
+            "GET /mqtt HTTP/1.1",
+            "\r\n".join(sorted("{}: {}".format(i, j) for i, j in websocket_headers.items())),
+            "\r\n",
+        ]).encode("utf8")
+
+        logger.info("Connecting to websockets with headers:\n%s", header)
 
         self._socket.send(header)
+
+        logger.debug("Sent %d bytes", sent)
 
         has_secret = False
         has_upgrade = False
