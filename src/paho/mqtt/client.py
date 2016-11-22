@@ -529,10 +529,13 @@ class Client(object):
         self._in_message_mutex = threading.Lock()
         self._thread = None
         self._thread_terminate = False
-        self._ssl = False
-        self._ssl_context = None
-        self._tls_insecure = False  # Only used when SSL context does not have check_hostname attribute
-        self._logger = None
+        self._tls_certfile = None
+        self._tls_keyfile = None
+        self._tls_ca_certs = None
+        self._tls_cert_reqs = None
+        self._tls_ciphers = None
+        self._tls_version = tls_version
+        self._tls_insecure = False
         # No default callbacks
         self._on_log = None
         self._on_connect = None
@@ -723,7 +726,7 @@ class Client(object):
 
         try:
             rr = '_mqtt._tcp.%s' % domain
-            if self._ssl:
+            if self.has_ssl() is not None:
                 # IANA specifies secure-mqtt (not mqtts) for port 8883
                 rr = '_secure-mqtt._tcp.%s' % domain
             answers = []
@@ -821,20 +824,18 @@ class Client(object):
 
         try:
             if (sys.version_info[0] == 2 and sys.version_info[1] < 7) or (sys.version_info[0] == 3 and sys.version_info[1] < 2):
-                sock = socket.create_connection((self._host, self._port))
+                self._bare_sock = socket.create_connection((self._host, self._port))
             else:
-                sock = socket.create_connection((self._host, self._port), source_address=(self._bind_address, 0))
+                self._bare_sock = socket.create_connection((self._host, self._port), source_address=(self._bind_address, 0))
         except socket.error as err:
             if err.errno != errno.EINPROGRESS and err.errno != errno.EWOULDBLOCK and err.errno != EAGAIN:
                 raise
 
-        if self._ssl:
-            # SSL is only supported when SSLContext is available (implies Python >= 2.7.9 or >= 3.2)
-
+        if self.has_ssl():
             verify_host = not self._tls_insecure
+
             try:
-                # Try with server_hostname, even it's not supported in certain scenarios
-                sock = self._ssl_context.wrap_socket(sock, server_hostname=self._host)
+                self._sock = self._ssl_context.wrap_socket(sock, server_hostname=self._host)
             except ssl.CertificateError:
                 # CertificateError is derived from ValueError
                 raise
@@ -850,15 +851,13 @@ class Client(object):
             if verify_host:
                 ssl.match_hostname(sock.getpeercert(), self._host)
 
-            self._ssl.do_handshake()
+            self._sock.do_handshake()
+        else:
+            self._sock = self._bare_sock
 
         if self._transport == "websockets":
-            if self._tls_ca_certs is not None:
-                self._ssl = WebsocketWrapper(self._ssl, self._host, self._port,
-                    True, self._get_auth_headers)
-            else:
-                sock = WebsocketWrapper(sock, self._host, self._port, False,
-                    None)
+            self._sock = WebsocketWrapper(self._sock, self._host, self._port,
+                True, self._get_auth_headers)
 
         self._sock = sock
         self._sock.setblocking(0)
@@ -1201,6 +1200,7 @@ class Client(object):
         for _ in range(0, max_packets):
             rc = self._packet_read()
             if rc > 0:
+                logger.error("Error reading packet from stream")
                 return self._loop_rc_handle(rc)
             elif rc == MQTT_ERR_AGAIN:
                 return MQTT_ERR_SUCCESS
@@ -1226,6 +1226,7 @@ class Client(object):
         for _ in range(0, max_packets):
             rc = self._packet_write()
             if rc > 0:
+                logger.error("Error writing packet to stream")
                 return self._loop_rc_handle(rc)
             elif rc == MQTT_ERR_AGAIN:
                 return MQTT_ERR_SUCCESS
@@ -1358,6 +1359,9 @@ class Client(object):
     def socket(self):
         """Return the socket or ssl object for this client."""
         return self._sock
+
+    def has_ssl(self):
+        return self._tls_ca_certs is not None
 
     def loop_forever(self, timeout=1.0, max_packets=1, retry_first_connection=False):
         """This function call loop() for you in an infinite blocking loop. It
@@ -1682,7 +1686,7 @@ class Client(object):
             try:
                 command = self._sock.recv(1)
             except socket.error as err:
-                if self._ssl and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
+                if self.has_ssl() and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
                     return MQTT_ERR_AGAIN
                 if err.errno == EAGAIN:
                     return MQTT_ERR_AGAIN
@@ -1690,6 +1694,7 @@ class Client(object):
                 return 1
             else:
                 if len(command) == 0:
+                    logger.error("Command had length 0")
                     return 1
                 command, = struct.unpack("!B", command)
                 self._in_packet['command'] = command
@@ -1702,7 +1707,7 @@ class Client(object):
                 try:
                     byte = self._sock.recv(1)
                 except socket.error as err:
-                    if self._ssl and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
+                    if self.has_ssl() and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
                         return MQTT_ERR_AGAIN
                     if err.errno == EAGAIN:
                         return MQTT_ERR_AGAIN
@@ -1729,7 +1734,7 @@ class Client(object):
             try:
                 data = self._sock.recv(self._in_packet['to_process'])
             except socket.error as err:
-                if self._ssl and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
+                if self.has_ssl() and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
                     return MQTT_ERR_AGAIN
                 if err.errno == EAGAIN:
                     return MQTT_ERR_AGAIN
@@ -1772,7 +1777,7 @@ class Client(object):
                 return MQTT_ERR_SUCCESS
             except socket.error as err:
                 self._current_out_packet_mutex.release()
-                if self._ssl and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
+                if self.has_ssl() and (err.errno == ssl.SSL_ERROR_WANT_READ or err.errno == ssl.SSL_ERROR_WANT_WRITE):
                     return MQTT_ERR_AGAIN
                 if err.errno == EAGAIN:
                     return MQTT_ERR_AGAIN
@@ -1839,7 +1844,7 @@ class Client(object):
         last_msg_out = self._last_msg_out
         last_msg_in = self._last_msg_in
         self._msgtime_mutex.release()
-        if self._sock is not None and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
+        if (self._sock is not None) and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
             if self._state == mqtt_cs_connected and self._ping_t == 0:
                 self._send_pingreq()
                 self._msgtime_mutex.acquire()
@@ -2543,7 +2548,6 @@ class WebsocketWrapper:
 
         self.connected = False
 
-        self._ssl = is_ssl
         self._host = host
         self._port = port
         self._socket = socket
@@ -2588,7 +2592,7 @@ class WebsocketWrapper:
 
         logger.debug("Connecting to websockets with headers:\n%s", header)
 
-        self._socket.send(header)
+        sent = self._socket.send(header)
 
         logger.debug("Sent %d bytes", sent)
 
@@ -2610,6 +2614,8 @@ class WebsocketWrapper:
                         else:
                             has_upgrade = True
 
+                        logger.debug("Successfully upgraded connection")
+
                     # check key hash
                     if b"sec-websocket-accept" in str(self._readbuffer).lower().encode('utf-8'):
                         GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -2625,6 +2631,8 @@ class WebsocketWrapper:
                             raise ValueError("WebSocket handshake error, invalid secret key")
                         else:
                             has_secret = True
+
+                        logger.debug("Successfully got secret")
                 else:
                     # ending linebreak
                     break
@@ -2641,6 +2649,8 @@ class WebsocketWrapper:
 
         self._readbuffer = bytearray()
         self.connected = True
+
+        logger.debug("Connected to broker")
 
     def _create_frame(self, opcode, data, do_masking=1):
 
@@ -2676,10 +2686,9 @@ class WebsocketWrapper:
     def _buffered_read(self, length):
 
         # try to recv and strore needed bytes
-        wanted_bytes = length - (len(self._readbuffer) - self._readbuffer_head)
-        if wanted_bytes > 0:
+        while self._readbuffer_head + length > len(self._readbuffer):
 
-            data = self._socket.recv(wanted_bytes)
+            data = self._socket.recv(self._readbuffer_head + length - len(self._readbuffer))
 
             if not data:
                 raise socket.error(errno.ECONNABORTED, 0)
@@ -2708,6 +2717,8 @@ class WebsocketWrapper:
 
             header1 = self._buffered_read(1)
             header2 = self._buffered_read(1)
+
+            logger.debug((header1, header2))
 
             opcode = (header1[0] & 0x0f)
             maskbit = (header2[0] & 0x80) == 0x80
