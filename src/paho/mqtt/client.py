@@ -518,7 +518,7 @@ class Client(object):
         self._host = ""
         self._port = 1883
         self._bind_address = ""
-        self._in_callback = False
+        self._in_callback = threading.Lock()
         self._strict_protocol = False
         self._callback_mutex = threading.RLock()
         self._state_mutex = threading.Lock()
@@ -1253,9 +1253,8 @@ class Client(object):
 
             with self._callback_mutex:
                 if self.on_disconnect:
-                    self._in_callback = True
-                    self.on_disconnect(self, self._userdata, rc)
-                    self._in_callback = False
+                    with self._in_callback:
+                        self.on_disconnect(self, self._userdata, rc)
 
             return MQTT_ERR_CONN_LOST
 
@@ -1657,9 +1656,8 @@ class Client(object):
 
             with self._callback_mutex:
                 if self.on_disconnect:
-                    self._in_callback = True
-                    self.on_disconnect(self, self._userdata, rc)
-                    self._in_callback = False
+                    with self._in_callback:
+                        self.on_disconnect(self, self._userdata, rc)
         return rc
 
     def _packet_read(self):
@@ -1790,9 +1788,8 @@ class Client(object):
                     if (packet['command'] & 0xF0) == PUBLISH and packet['qos'] == 0:
                         with self._callback_mutex:
                             if self.on_publish:
-                                self._in_callback = True
-                                self.on_publish(self, self._userdata, packet['mid'])
-                                self._in_callback = False
+                                with self._in_callback:
+                                    self.on_publish(self, self._userdata, packet['mid'])
 
                         packet['info']._set_as_published()
 
@@ -1805,9 +1802,8 @@ class Client(object):
 
                         with self._callback_mutex:
                             if self.on_disconnect:
-                                self._in_callback = True
-                                self.on_disconnect(self, self._userdata, 0)
-                                self._in_callback = False
+                                with self._in_callback:
+                                    self.on_disconnect(self, self._userdata, 0)
 
                         self.close_socket()
                         return MQTT_ERR_SUCCESS
@@ -1854,9 +1850,8 @@ class Client(object):
                     rc = 1
                 with self._callback_mutex:
                     if self.on_disconnect:
-                        self._in_callback = True
-                        self.on_disconnect(self, self._userdata, rc)
-                        self._in_callback = False
+                        with self._in_callback:
+                            self.on_disconnect(self, self._userdata, rc)
 
     def _mid_generate(self):
         self._last_mid += 1
@@ -2166,10 +2161,12 @@ class Client(object):
             if err.errno != EAGAIN:
                 raise
 
-        if not self._in_callback and self._thread is None:
-            return self.loop_write()
-        else:
-            return MQTT_ERR_SUCCESS
+        if self._thread is None:
+            if self._in_callback.acquire(False):
+                self._in_callback.release()
+                return self.loop_write()
+
+        return MQTT_ERR_SUCCESS
 
     def _packet_handle(self):
         cmd = self._in_packet['command'] & 0xF0
@@ -2238,20 +2235,20 @@ class Client(object):
 
         with self._callback_mutex:
             if self.on_connect:
-                self._in_callback = True
                 if sys.version_info[0] < 3:
                     argcount = self.on_connect.func_code.co_argcount
                 else:
                     argcount = self.on_connect.__code__.co_argcount
 
                 if argcount == 3:
-                    self.on_connect(self, self._userdata, result)
+                    with self._in_callback:
+                        self.on_connect(self, self._userdata, result)
                 else:
                     flags_dict = {}
                     flags_dict['session present'] = flags & 0x01
-                    self.on_connect(self, self._userdata, flags_dict, result)
+                    with self._in_callback:
+                        self.on_connect(self, self._userdata, flags_dict, result)
 
-                self._in_callback = False
         if result == 0:
             rc = 0
             self._out_message_mutex.acquire()
@@ -2263,9 +2260,8 @@ class Client(object):
                     return MQTT_ERR_SUCCESS
 
                 if m.qos == 0:
-                    self._in_callback = True  # Don't call loop_write after _send_publish()
-                    rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
-                    self._in_callback = False
+                    with self._in_callback:  # Don't call loop_write after _send_publish()
+                        rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
                     if rc != 0:
                         self._out_message_mutex.release()
                         return rc
@@ -2273,9 +2269,8 @@ class Client(object):
                     if m.state == mqtt_ms_publish:
                         self._inflight_messages += 1
                         m.state = mqtt_ms_wait_for_puback
-                        self._in_callback = True  # Don't call loop_write after _send_publish()
-                        rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
-                        self._in_callback = False
+                        with self._in_callback:  # Don't call loop_write after _send_publish()
+                            rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
                         if rc != 0:
                             self._out_message_mutex.release()
                             return rc
@@ -2283,18 +2278,16 @@ class Client(object):
                     if m.state == mqtt_ms_publish:
                         self._inflight_messages += 1
                         m.state = mqtt_ms_wait_for_pubrec
-                        self._in_callback = True  # Don't call loop_write after _send_publish()
-                        rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
-                        self._in_callback = False
+                        with self._in_callback:  # Don't call loop_write after _send_publish()
+                            rc = self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
                         if rc != 0:
                             self._out_message_mutex.release()
                             return rc
                     elif m.state == mqtt_ms_resend_pubrel:
                         self._inflight_messages += 1
                         m.state = mqtt_ms_wait_for_pubcomp
-                        self._in_callback = True  # Don't call loop_write after _send_pubrel()
-                        rc = self._send_pubrel(m.mid, m.dup)
-                        self._in_callback = False
+                        with self._in_callback:  # Don't call loop_write after _send_publish()
+                            rc = self._send_pubrel(m.mid, m.dup)
                         if rc != 0:
                             self._out_message_mutex.release()
                             return rc
@@ -2315,9 +2308,8 @@ class Client(object):
 
         with self._callback_mutex:
             if self.on_subscribe:
-                self._in_callback = True
-                self.on_subscribe(self, self._userdata, mid, granted_qos)
-                self._in_callback = False
+                with self._in_callback:  # Don't call loop_write after _send_publish()
+                    self.on_subscribe(self, self._userdata, mid, granted_qos)
 
         return MQTT_ERR_SUCCESS
 
@@ -2449,18 +2441,16 @@ class Client(object):
         logger.debug("Received UNSUBACK (Mid: "+str(mid)+")")
         with self._callback_mutex:
             if self.on_unsubscribe:
-                self._in_callback = True
-                self.on_unsubscribe(self, self._userdata, mid)
-                self._in_callback = False
+                with self._in_callback:
+                    self.on_unsubscribe(self, self._userdata, mid)
         return MQTT_ERR_SUCCESS
 
     def _do_on_publish(self, idx, mid):
         with self._callback_mutex:
             if self.on_publish:
                 self._out_message_mutex.release()
-                self._in_callback = True
-                self.on_publish(self, self._userdata, mid)
-                self._in_callback = False
+                with self._in_callback:
+                    self.on_publish(self, self._userdata, mid)
                 self._out_message_mutex.acquire()
 
         msg = self._out_messages.pop(idx)
@@ -2501,15 +2491,13 @@ class Client(object):
         matched = False
         with self._callback_mutex:
             for callback in self._on_message_filtered.iter_match(message.topic):
-                self._in_callback = True
-                callback(self, self._userdata, message)
-                self._in_callback = False
+                with self._in_callback:
+                    callback(self, self._userdata, message)
                 matched = True
 
             if matched == False and self.on_message:
-                self._in_callback = True
-                self.on_message(self, self._userdata, message)
-                self._in_callback = False
+                with self._in_callback:
+                    self.on_message(self, self._userdata, message)
 
     def _thread_main(self):
         self.loop_forever(retry_first_connection=True)
