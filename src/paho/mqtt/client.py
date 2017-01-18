@@ -678,17 +678,6 @@ class Client(object):
             # If verify_mode is CERT_NONE then the host name will never be checked
             self._ssl_context.check_hostname = not value
 
-    def enable_logger(self, logger=None):
-        if not logger:
-            if self._logger:
-                # Do not replace existing logger
-                return
-            logger = logging.getLogger(__name__)
-        self._logger = logger
-
-    def disable_logger(self):
-        self._logger = None
-
     def connect(self, host, port=1883, keepalive=60, bind_address=""):
         """Connect to a remote broker.
 
