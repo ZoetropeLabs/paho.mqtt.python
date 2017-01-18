@@ -1245,16 +1245,18 @@ class Client(object):
             # This hasn't happened in the keepalive time so we should disconnect.
             self.close_socket()
 
-            self._callback_mutex.acquire()
-            if self._state == mqtt_cs_disconnecting:
-                rc = MQTT_ERR_SUCCESS
-            else:
-                rc = 1
-            if self.on_disconnect:
-                self._in_callback = True
-                self.on_disconnect(self, self._userdata, rc)
-                self._in_callback = False
-            self._callback_mutex.release()
+            with self._state_mutex:
+                if self._state == mqtt_cs_disconnecting:
+                    rc = MQTT_ERR_SUCCESS
+                else:
+                    rc = 1
+
+            with self._callback_mutex:
+                if self.on_disconnect:
+                    self._in_callback = True
+                    self.on_disconnect(self, self._userdata, rc)
+                    self._in_callback = False
+
             return MQTT_ERR_CONN_LOST
 
         return MQTT_ERR_SUCCESS
@@ -1488,7 +1490,8 @@ class Client(object):
             5: Connection refused - not authorised
             6-255: Currently unused.
         """
-        self._on_connect = func
+        with self._callback_mutex:
+            self._on_connect = func
 
     @property
     def on_subscribe(self):
@@ -1510,7 +1513,8 @@ class Client(object):
         granted_qos:    list of integers that give the QoS level the broker has
                         granted for each of the different subscription requests.
         """
-        self._on_subscribe = func
+        with self._callback_mutex:
+            self._on_subscribe = func
 
     @property
     def on_message(self):
@@ -1534,7 +1538,8 @@ class Client(object):
         message:    an instance of MQTTMessage.
                     This is a class with members topic, payload, qos, retain.
         """
-        self._on_message = func
+        with self._callback_mutex:
+            self._on_message = func
 
     @property
     def on_publish(self):
@@ -1560,7 +1565,8 @@ class Client(object):
         mid:        matches the mid variable returned from the corresponding
                     publish() call, to allow outgoing messages to be tracked.
         """
-        self._on_publish = func
+        with self._callback_mutex:
+            self._on_publish = func
 
     @property
     def on_unsubscribe(self):
@@ -1580,7 +1586,8 @@ class Client(object):
         mid:        matches the mid variable returned from the corresponding
                     unsubscribe() call.
         """
-        self._on_unsubscribe = func
+        with self._callback_mutex:
+            self._on_unsubscribe = func
 
     @property
     def on_disconnect(self):
@@ -1603,7 +1610,8 @@ class Client(object):
                     a disconnect() call. If any other value the disconnection
                     was unexpected, such as might be caused by a network error.
         """
-        self._on_disconnect = func
+        with self._callback_mutex:
+            self._on_disconnect = func
 
     def message_callback_add(self, sub, callback):
         """Register a message callback for a specific topic.
@@ -1646,13 +1654,12 @@ class Client(object):
             if self._state == mqtt_cs_disconnecting:
                 rc = MQTT_ERR_SUCCESS
             self._state_mutex.release()
-            self._callback_mutex.acquire()
-            if self.on_disconnect:
-                self._in_callback = True
-                self.on_disconnect(self, self._userdata, rc)
-                self._in_callback = False
 
-            self._callback_mutex.release()
+            with self._callback_mutex:
+                if self.on_disconnect:
+                    self._in_callback = True
+                    self.on_disconnect(self, self._userdata, rc)
+                    self._in_callback = False
         return rc
 
     def _packet_read(self):
@@ -1781,12 +1788,11 @@ class Client(object):
 
                 if packet['to_process'] == 0:
                     if (packet['command'] & 0xF0) == PUBLISH and packet['qos'] == 0:
-                        self._callback_mutex.acquire()
-                        if self.on_publish:
-                            self._in_callback = True
-                            self.on_publish(self, self._userdata, packet['mid'])
-                            self._in_callback = False
-                        self._callback_mutex.release()
+                        with self._callback_mutex:
+                            if self.on_publish:
+                                self._in_callback = True
+                                self.on_publish(self, self._userdata, packet['mid'])
+                                self._in_callback = False
 
                         packet['info']._set_as_published()
 
@@ -1797,12 +1803,11 @@ class Client(object):
                         self._last_msg_out = time_func()
                         self._msgtime_mutex.release()
 
-                        self._callback_mutex.acquire()
-                        if self.on_disconnect:
-                            self._in_callback = True
-                            self.on_disconnect(self, self._userdata, 0)
-                            self._in_callback = False
-                        self._callback_mutex.release()
+                        with self._callback_mutex:
+                            if self.on_disconnect:
+                                self._in_callback = True
+                                self.on_disconnect(self, self._userdata, 0)
+                                self._in_callback = False
 
                         self.close_socket()
                         return MQTT_ERR_SUCCESS
@@ -1847,12 +1852,11 @@ class Client(object):
                     rc = MQTT_ERR_SUCCESS
                 else:
                     rc = 1
-                self._callback_mutex.acquire()
-                if self.on_disconnect:
-                    self._in_callback = True
-                    self.on_disconnect(self, self._userdata, rc)
-                    self._in_callback = False
-                self._callback_mutex.release()
+                with self._callback_mutex:
+                    if self.on_disconnect:
+                        self._in_callback = True
+                        self.on_disconnect(self, self._userdata, rc)
+                        self._in_callback = False
 
     def _mid_generate(self):
         self._last_mid += 1
@@ -2231,23 +2235,23 @@ class Client(object):
             self._state = mqtt_cs_connected
 
         logger.debug("Received CONNACK ("+str(flags)+", "+str(result)+")")
-        self._callback_mutex.acquire()
-        if self.on_connect:
-            self._in_callback = True
 
-            if sys.version_info[0] < 3:
-                argcount = self.on_connect.func_code.co_argcount
-            else:
-                argcount = self.on_connect.__code__.co_argcount
+        with self._callback_mutex:
+            if self.on_connect:
+                self._in_callback = True
+                if sys.version_info[0] < 3:
+                    argcount = self.on_connect.func_code.co_argcount
+                else:
+                    argcount = self.on_connect.__code__.co_argcount
 
-            if argcount == 3:
-                self.on_connect(self, self._userdata, result)
-            else:
-                flags_dict = {}
-                flags_dict['session present'] = flags & 0x01
-                self.on_connect(self, self._userdata, flags_dict, result)
-            self._in_callback = False
-        self._callback_mutex.release()
+                if argcount == 3:
+                    self.on_connect(self, self._userdata, result)
+                else:
+                    flags_dict = {}
+                    flags_dict['session present'] = flags & 0x01
+                    self.on_connect(self, self._userdata, flags_dict, result)
+
+                self._in_callback = False
         if result == 0:
             rc = 0
             self._out_message_mutex.acquire()
@@ -2309,12 +2313,11 @@ class Client(object):
         pack_format = "!" + "B" * len(packet)
         granted_qos = struct.unpack(pack_format, packet)
 
-        self._callback_mutex.acquire()
-        if self.on_subscribe:
-            self._in_callback = True
-            self.on_subscribe(self, self._userdata, mid, granted_qos)
-            self._in_callback = False
-        self._callback_mutex.release()
+        with self._callback_mutex:
+            if self.on_subscribe:
+                self._in_callback = True
+                self.on_subscribe(self, self._userdata, mid, granted_qos)
+                self._in_callback = False
 
         return MQTT_ERR_SUCCESS
 
@@ -2444,12 +2447,11 @@ class Client(object):
 
         mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received UNSUBACK (Mid: "+str(mid)+")")
-        self._callback_mutex.acquire()
-        if self.on_unsubscribe:
-            self._in_callback = True
-            self.on_unsubscribe(self, self._userdata, mid)
-            self._in_callback = False
-        self._callback_mutex.release()
+        with self._callback_mutex:
+            if self.on_unsubscribe:
+                self._in_callback = True
+                self.on_unsubscribe(self, self._userdata, mid)
+                self._in_callback = False
         return MQTT_ERR_SUCCESS
 
     def _do_on_publish(self, idx, mid):
@@ -2496,20 +2498,18 @@ class Client(object):
         return MQTT_ERR_SUCCESS
 
     def _handle_on_message(self, message):
-        self._callback_mutex.acquire()
         matched = False
-        for callback in self._on_message_filtered.iter_match(message.topic):
-            self._in_callback = True
-            callback(self, self._userdata, message)
-            self._in_callback = False
-            matched = True
+        with self._callback_mutex:
+            for callback in self._on_message_filtered.iter_match(message.topic):
+                self._in_callback = True
+                callback(self, self._userdata, message)
+                self._in_callback = False
+                matched = True
 
-        if matched == False and self.on_message:
-            self._in_callback = True
-            self.on_message(self, self._userdata, message)
-            self._in_callback = False
-
-        self._callback_mutex.release()
+            if matched == False and self.on_message:
+                self._in_callback = True
+                self.on_message(self, self._userdata, message)
+                self._in_callback = False
 
     def _thread_main(self):
         self.loop_forever(retry_first_connection=True)
