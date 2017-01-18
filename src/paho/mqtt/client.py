@@ -37,7 +37,6 @@ import uuid
 import base64
 import string
 import hashlib
-import logging
 try:
     # Use monotonic clock if available
     time_func = time.monotonic
@@ -1421,7 +1420,7 @@ class Client(object):
                 else:
                     try:
                         self.reconnect()
-                    except socket.error as err:
+                    except socket.error:
                         pass
 
         return rc
@@ -2647,10 +2646,10 @@ class WebsocketWrapper:
 
     def _buffered_read(self, length):
 
+        wanted_bytes = length - (len(self._readbuffer) - self._readbuffer_head)
         # try to recv and strore needed bytes
-        while self._readbuffer_head + length > len(self._readbuffer):
-
-            data = self._socket.recv(self._readbuffer_head + length - len(self._readbuffer))
+        if wanted_bytes > 0:
+            data = self._socket.recv(wanted_bytes)
 
             if not data:
                 raise socket.error(errno.ECONNABORTED, 0)

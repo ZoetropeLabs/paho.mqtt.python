@@ -21,7 +21,6 @@ you to pass a callback for processing of messages.
 
 import paho.mqtt.client as paho
 import paho.mqtt as mqtt
-import ssl
 
 
 def _on_connect(c, userdata, flags, rc):
