@@ -1245,11 +1245,10 @@ class Client(object):
             # This hasn't happened in the keepalive time so we should disconnect.
             self.close_socket()
 
-            with self._state_mutex:
-                if self._state == mqtt_cs_disconnecting:
-                    rc = MQTT_ERR_SUCCESS
-                else:
-                    rc = 1
+            if self.check_state_safe(mqtt_cs_disconnecting):
+                rc = MQTT_ERR_SUCCESS
+            else:
+                rc = 1
 
             with self._callback_mutex:
                 if self.on_disconnect:
@@ -1355,6 +1354,10 @@ class Client(object):
             self._sock = None
             self._bare_sock = None
 
+    def check_state_safe(self, state):
+        with self._state_mutex:
+            return self._state == state
+
     def loop_forever(self, timeout=1.0, max_packets=1, retry_first_connection=False):
         """This function call loop() for you in an infinite blocking loop. It
         is useful for the case where you only want to run the MQTT client loop
@@ -1378,7 +1381,7 @@ class Client(object):
             if self._thread_terminate is True:
                 break
 
-            if self._state == mqtt_cs_connect_async:
+            if self.check_state_safe(mqtt_cs_connect_async):
                 try:
                     self.reconnect()
                 except socket.error:
@@ -1409,8 +1412,7 @@ class Client(object):
             logger.info("Unexpected return code from loop - %s", rc)
 
             def should_exit():
-                with self._state_mutex:
-                    return self._state == mqtt_cs_disconnecting or run is False or self._thread_terminate is True
+                return self.check_state_safe(mqtt_cs_disconnecting) or run is False or self._thread_terminate is True
 
             if should_exit():
                 run = False
@@ -1649,10 +1651,8 @@ class Client(object):
         if rc:
             self.close_socket()
 
-            self._state_mutex.acquire()
-            if self._state == mqtt_cs_disconnecting:
+            if self.check_state_safe(mqtt_cs_disconnecting):
                 rc = MQTT_ERR_SUCCESS
-            self._state_mutex.release()
 
             with self._callback_mutex:
                 if self.on_disconnect:
@@ -1836,7 +1836,7 @@ class Client(object):
             last_msg_in = self._last_msg_in
 
         if (self._sock is not None) and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
-            if self._state == mqtt_cs_connected and self._ping_t == 0:
+            if self.check_state_safe(mqtt_cs_connected) and self._ping_t == 0:
                 self._send_pingreq()
                 with self._msgtime_mutex:
                     self._last_msg_out = now
@@ -1844,7 +1844,7 @@ class Client(object):
             else:
                 self.close_socket()
 
-                if self._state == mqtt_cs_disconnecting:
+                if self.check_state_safe(mqtt_cs_disconnecting):
                     rc = MQTT_ERR_SUCCESS
                 else:
                     rc = 1
