@@ -1690,7 +1690,7 @@ class Client(object):
                 return 1
             else:
                 if len(command) == 0:
-                    logger.error("Tried to read a byte from socket, but got nothing")
+                    logger.error("Tried to read a byte from socket, but got nothing - probably disconnected")
                     return 1
                 command, = struct.unpack("!B", command)
                 self._in_packet['command'] = command
