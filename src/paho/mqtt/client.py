@@ -583,7 +583,6 @@ class Client(object):
             else:
                 raise ValueError('SSL/TLS context must be specified')
 
-        self._ssl = True
         self._ssl_context = context
 
         # Ensure _tls_insecure is consistent with check_hostname attribute
