@@ -1790,12 +1790,11 @@ class Client(object):
                         self.close_socket()
                         return MQTT_ERR_SUCCESS
 
-                    self._out_packet_mutex.acquire()
-                    if len(self._out_packet) > 0:
-                        self._current_out_packet = self._out_packet.popleft()
-                    else:
-                        self._current_out_packet = None
-                    self._out_packet_mutex.release()
+                    with self._out_packet_mutex:
+                        if len(self._out_packet) > 0:
+                            self._current_out_packet = self._out_packet.popleft()
+                        else:
+                            self._current_out_packet = None
             else:
                 break
 
