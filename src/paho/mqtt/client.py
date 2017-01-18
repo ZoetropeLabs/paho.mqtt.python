@@ -2058,9 +2058,10 @@ class Client(object):
         self._pack_remaining_length(packet, remaining_length)
         local_mid = self._mid_generate()
         packet.extend(struct.pack("!H", local_mid))
-        for t, q in topics:
-            self._pack_str16(packet, t)
-            packet.append(q)
+        for t in topics:
+            self._pack_str16(packet, t[0])
+            packet.extend(struct.pack("B", t[1]))
+        logger.debug("Queueing SUBSCRIBE packet")
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _send_unsubscribe(self, dup, topics):
