@@ -2418,13 +2418,15 @@ class Client(object):
         mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received PUBREC (Mid: "+str(mid)+")")
 
-        with self._out_message_mutex:
-            for m in self._out_messages:
-                if m.mid == mid:
-                    m.state = mqtt_ms_wait_for_pubcomp
-                    m.timestamp = time_func()
-                    return self._send_pubrel(mid, False)
+        self._out_message_mutex.acquire()
+        for m in self._out_messages:
+            if m.mid == mid:
+                m.state = mqtt_ms_wait_for_pubcomp
+                m.timestamp = time_func()
+                self._out_message_mutex.release()
+                return self._send_pubrel(mid, False)
 
+        self._out_message_mutex.release()
         return MQTT_ERR_SUCCESS
 
     def _handle_unsuback(self):
