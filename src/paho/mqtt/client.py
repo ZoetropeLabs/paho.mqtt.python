@@ -1350,7 +1350,7 @@ class Client(object):
 
     def has_ssl(self):
         """ Return whether ssl is enabled for this connection """
-        return self._tls_ca_certs is not None
+        return self._ssl_context is not None
 
     def close_socket(self):
         """ Close socket - possibly ssl socket as well """
@@ -2383,7 +2383,7 @@ class Client(object):
         if len(self._in_packet['packet']) != 2:
             return MQTT_ERR_PROTOCOL
 
-        mid = struct.unpack("!H", self._in_packet['packet'])
+        mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received PUBREL (Mid: "+str(mid)+")")
 
         self._in_message_mutex.acquire()
@@ -2431,7 +2431,7 @@ class Client(object):
             if self._in_packet['remaining_length'] != 2:
                 return MQTT_ERR_PROTOCOL
 
-        mid = struct.unpack("!H", self._in_packet['packet'])
+        mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received PUBREC (Mid: "+str(mid)+")")
 
         self._out_message_mutex.acquire()
@@ -2450,7 +2450,7 @@ class Client(object):
             if self._in_packet['remaining_length'] != 2:
                 return MQTT_ERR_PROTOCOL
 
-        mid = struct.unpack("!H", self._in_packet['packet'])
+        mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received UNSUBACK (Mid: "+str(mid)+")")
         self._callback_mutex.acquire()
         if self.on_unsubscribe:
@@ -2484,7 +2484,7 @@ class Client(object):
             if self._in_packet['remaining_length'] != 2:
                 return MQTT_ERR_PROTOCOL
 
-        mid = struct.unpack("!H", self._in_packet['packet'])
+        mid, = struct.unpack("!H", self._in_packet['packet'])
         logger.debug("Received "+cmd+" (Mid: "+str(mid)+")")
 
         self._out_message_mutex.acquire()
