@@ -872,17 +872,14 @@ class Client(object):
         if timeout < 0.0:
             raise ValueError('Invalid timeout.')
 
-        self._current_out_packet_mutex.acquire()
-        self._out_packet_mutex.acquire()
-        if self._current_out_packet is None and len(self._out_packet) > 0:
-            self._current_out_packet = self._out_packet.popleft()
+        with self._current_out_packet_mutex, self._out_packet_mutex:
+            if self._current_out_packet is None and len(self._out_packet) > 0:
+                self._current_out_packet = self._out_packet.popleft()
 
-        if self._current_out_packet:
-            wlist = [self._sock]
-        else:
-            wlist = []
-        self._out_packet_mutex.release()
-        self._current_out_packet_mutex.release()
+            if self._current_out_packet:
+                wlist = [self._sock]
+            else:
+                wlist = []
 
         # sockpairR is used to break out of select() before the timeout, on a
         # call to publish() etc.
@@ -1755,9 +1752,8 @@ class Client(object):
             'to_process': 0,
             'pos': 0}
 
-        self._msgtime_mutex.acquire()
-        self._last_msg_in = time_func()
-        self._msgtime_mutex.release()
+        with self._msgtime_mutex:
+            self._last_msg_in = time_func()
         return rc
 
     def _packet_write(self):
@@ -1796,9 +1792,8 @@ class Client(object):
                     if (packet['command'] & 0xF0) == DISCONNECT:
                         self._current_out_packet_mutex.release()
 
-                        self._msgtime_mutex.acquire()
-                        self._last_msg_out = time_func()
-                        self._msgtime_mutex.release()
+                        with self._msgtime_mutex:
+                            self._last_msg_out = time_func()
 
                         with self._callback_mutex:
                             if self.on_disconnect:
@@ -1819,9 +1814,8 @@ class Client(object):
 
         self._current_out_packet_mutex.release()
 
-        self._msgtime_mutex.acquire()
-        self._last_msg_out = time_func()
-        self._msgtime_mutex.release()
+        with self._msgtime_mutex:
+            self._last_msg_out = time_func()
 
         return MQTT_ERR_SUCCESS
 
@@ -2072,64 +2066,61 @@ class Client(object):
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _message_retry_check_actual(self, messages, mutex):
-        mutex.acquire()
-        now = time_func()
-        for m in messages:
-            if m.timestamp + self._message_retry < now:
-                if m.state == mqtt_ms_wait_for_puback or m.state == mqtt_ms_wait_for_pubrec:
-                    m.timestamp = now
-                    m.dup = True
-                    self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
-                elif m.state == mqtt_ms_wait_for_pubrel:
-                    m.timestamp = now
-                    m.dup = True
-                    self._send_pubrec(m.mid)
-                elif m.state == mqtt_ms_wait_for_pubcomp:
-                    m.timestamp = now
-                    m.dup = True
-                    self._send_pubrel(m.mid, True)
-        mutex.release()
+        with mutex:
+            now = time_func()
+            for m in messages:
+                if m.timestamp + self._message_retry < now:
+                    if m.state == mqtt_ms_wait_for_puback or m.state == mqtt_ms_wait_for_pubrec:
+                        m.timestamp = now
+                        m.dup = True
+                        self._send_publish(m.mid, m.topic, m.payload, m.qos, m.retain, m.dup)
+                    elif m.state == mqtt_ms_wait_for_pubrel:
+                        m.timestamp = now
+                        m.dup = True
+                        self._send_pubrec(m.mid)
+                    elif m.state == mqtt_ms_wait_for_pubcomp:
+                        m.timestamp = now
+                        m.dup = True
+                        self._send_pubrel(m.mid, True)
 
     def _message_retry_check(self):
         self._message_retry_check_actual(self._out_messages, self._out_message_mutex)
         self._message_retry_check_actual(self._in_messages, self._in_message_mutex)
 
     def _messages_reconnect_reset_out(self):
-        self._out_message_mutex.acquire()
-        self._inflight_messages = 0
-        for m in self._out_messages:
-            m.timestamp = 0
-            if self._max_inflight_messages == 0 or self._inflight_messages < self._max_inflight_messages:
-                if m.qos == 0:
-                    m.state = mqtt_ms_publish
-                elif m.qos == 1:
-                    # self._inflight_messages = self._inflight_messages + 1
-                    if m.state == mqtt_ms_wait_for_puback:
-                        m.dup = True
-                    m.state = mqtt_ms_publish
-                elif m.qos == 2:
-                    # self._inflight_messages = self._inflight_messages + 1
-                    if m.state == mqtt_ms_wait_for_pubcomp:
-                        m.state = mqtt_ms_resend_pubrel
-                        m.dup = True
-                    else:
-                        if m.state == mqtt_ms_wait_for_pubrec:
+        with self._out_message_mutex:
+            self._inflight_messages = 0
+            for m in self._out_messages:
+                m.timestamp = 0
+                if self._max_inflight_messages == 0 or self._inflight_messages < self._max_inflight_messages:
+                    if m.qos == 0:
+                        m.state = mqtt_ms_publish
+                    elif m.qos == 1:
+                        # self._inflight_messages = self._inflight_messages + 1
+                        if m.state == mqtt_ms_wait_for_puback:
                             m.dup = True
                         m.state = mqtt_ms_publish
-            else:
-                m.state = mqtt_ms_queued
-        self._out_message_mutex.release()
+                    elif m.qos == 2:
+                        # self._inflight_messages = self._inflight_messages + 1
+                        if m.state == mqtt_ms_wait_for_pubcomp:
+                            m.state = mqtt_ms_resend_pubrel
+                            m.dup = True
+                        else:
+                            if m.state == mqtt_ms_wait_for_pubrec:
+                                m.dup = True
+                            m.state = mqtt_ms_publish
+                else:
+                    m.state = mqtt_ms_queued
 
     def _messages_reconnect_reset_in(self):
-        self._in_message_mutex.acquire()
-        for m in self._in_messages:
-            m.timestamp = 0
-            if m.qos != 2:
-                self._in_messages.pop(self._in_messages.index(m))
-            else:
-                # Preserve current state
-                pass
-        self._in_message_mutex.release()
+        with self._in_message_mutex:
+            for m in self._in_messages:
+                m.timestamp = 0
+                if m.qos != 2:
+                    self._in_messages.pop(self._in_messages.index(m))
+                else:
+                    # Preserve current state
+                    pass
 
     def _messages_reconnect_reset(self):
         self._messages_reconnect_reset_out()
@@ -2145,13 +2136,12 @@ class Client(object):
             'packet': packet,
             'info': info}
 
-        self._out_packet_mutex.acquire()
-        self._out_packet.append(mpkt)
-        if self._current_out_packet_mutex.acquire(False):
-            if self._current_out_packet is None and len(self._out_packet) > 0:
-                self._current_out_packet = self._out_packet.popleft()
-            self._current_out_packet_mutex.release()
-        self._out_packet_mutex.release()
+        with self._out_packet_mutex:
+            self._out_packet.append(mpkt)
+            if self._current_out_packet_mutex.acquire(False):
+                if self._current_out_packet is None and len(self._out_packet) > 0:
+                    self._current_out_packet = self._out_packet.popleft()
+                self._current_out_packet_mutex.release()
 
         # Write a single byte to sockpairW (connected to sockpairR) to break
         # out of select() if in threaded mode.
