@@ -24,6 +24,7 @@ import paho.mqtt as mqtt
 
 
 def _on_connect(c, userdata, flags, rc):
+    # pylint: disable=unused-argument
     """Internal callback"""
     if rc != 0:
         raise mqtt.MQTTException(paho.connack_string(rc))
@@ -47,7 +48,7 @@ def _on_message_simple(c, userdata, message):
         return
 
     # Don't process stale retained messages if 'retained' was false
-    if userdata['retained'] == False and message.retain == True:
+    if (not userdata['retained']) and message.retain:
         return
 
     userdata['msg_count'] = userdata['msg_count'] - 1
@@ -62,7 +63,7 @@ def _on_message_simple(c, userdata, message):
         c.disconnect()
 
 
-def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
+def callback(callback_in, topics, qos=0, userdata=None, hostname="localhost",
         port=1883, client_id="", keepalive=60, will=None, auth=None, tls=None,
         protocol=paho.MQTTv311, transport="tcp"):
     """Subscribe to a list of topics and process them in a callback function.
@@ -71,7 +72,7 @@ def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
     to a list of topics. Incoming messages are processed by the user provided
     callback.  This is a blocking function and will never return.
 
-    callback : function of the form "on_message(client, userdata, message)" for
+    callback_in : function of the form "on_message(client, userdata, message)" for
                processing the messages received.
 
     topics : either a string containing a single topic to subscribe to, or a
@@ -123,7 +124,7 @@ def callback(callback, topics, qos=0, userdata=None, hostname="localhost",
         raise ValueError('qos must be in the range 0-2')
 
     callback_userdata = {
-            'callback':callback,
+            'callback':callback_in,
             'topics':topics,
             'qos':qos,
             'userdata':userdata}

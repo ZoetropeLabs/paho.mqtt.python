@@ -37,6 +37,8 @@ import uuid
 import base64
 import string
 import hashlib
+
+from .matcher import MQTTMatcher
 try:
     # Use monotonic clock if available
     time_func = time.monotonic
@@ -50,10 +52,8 @@ except ImportError:
 else:
     HAVE_DNS = True
 
-from .matcher import MQTTMatcher
-
 if platform.system() == 'Windows':
-    EAGAIN = errno.WSAEWOULDBLOCK
+    EAGAIN = errno.WSAEWOULDBLOCK # pylint: disable=no-member
 else:
     EAGAIN = errno.EAGAIN
 
@@ -73,8 +73,9 @@ PROTOCOL_NAMEv311 = "MQTT"
 
 if sys.version_info[0] >= 3:
     # define some alias for python2 compatibility
-    unicode = str
-    basestring = str
+    # FIXME use bytes()?
+    unicode = str # pylint: disable=redefined-builtin
+    basestring = str # pylint: disable=redefined-builtin
 
 
 # Message types
@@ -254,13 +255,13 @@ def _socketpair_compat():
     except socket.error as err:
         if err.errno != errno.EINPROGRESS and err.errno != errno.EWOULDBLOCK and err.errno != EAGAIN:
             raise
-    sock2, address = listensock.accept()
+    sock2, _ = listensock.accept()
     sock2.setblocking(0)
     listensock.close()
     return (sock1, sock2)
 
 
-class MQTTMessageInfo:
+class MQTTMessageInfo(object):
     """This is a class returned from Client.publish() and can be used to find
     out the mid of the message that was published, and to determine whether the
     message has been published, and/or wait until it is published.
@@ -316,7 +317,7 @@ class MQTTMessageInfo:
         return self._published
 
 
-class MQTTMessage:
+class MQTTMessage(object):
     """ This is a class that describes an incoming or outgoing message. It is
     passed to the on_message callback as the message parameter.
 
@@ -477,7 +478,8 @@ class Client(object):
 
         if client_id == "" or client_id is None:
             if protocol == MQTTv31:
-                self._client_id = base62(uuid.uuid4().int, padding=22)
+                # false positive on pylint
+                self._client_id = base62(uuid.uuid4().int, padding=22) # pylint: disable=no-member
             else:
                 self._client_id = b""
         else:
@@ -1249,7 +1251,7 @@ class Client(object):
             with self._callback_mutex:
                 if self.on_disconnect:
                     with self._in_callback:
-                        self.on_disconnect(self, self._userdata, rc)
+                        self.on_disconnect(self, self._userdata, rc) # pylint: disable=not-callable
 
             return MQTT_ERR_CONN_LOST
 
@@ -1653,7 +1655,7 @@ class Client(object):
             with self._callback_mutex:
                 if self.on_disconnect:
                     with self._in_callback:
-                        self.on_disconnect(self, self._userdata, rc)
+                        self.on_disconnect(self, self._userdata, rc) # pylint: disable=not-callable
         return rc
 
     def _packet_read(self):
@@ -1784,7 +1786,7 @@ class Client(object):
                         with self._callback_mutex:
                             if self.on_publish:
                                 with self._in_callback:
-                                    self.on_publish(self, self._userdata, packet['mid'])
+                                    self.on_publish(self, self._userdata, packet['mid']) # pylint: disable=not-callable
 
                         packet['info']._set_as_published()
 
@@ -1797,7 +1799,7 @@ class Client(object):
                         with self._callback_mutex:
                             if self.on_disconnect:
                                 with self._in_callback:
-                                    self.on_disconnect(self, self._userdata, 0)
+                                    self.on_disconnect(self, self._userdata, 0) # pylint: disable=not-callable
 
                         self.close_socket()
                         return MQTT_ERR_SUCCESS
@@ -1844,7 +1846,7 @@ class Client(object):
                 with self._callback_mutex:
                     if self.on_disconnect:
                         with self._in_callback:
-                            self.on_disconnect(self, self._userdata, rc)
+                            self.on_disconnect(self, self._userdata, rc) # pylint: disable=not-callable
 
     def _mid_generate(self):
         self._last_mid += 1
@@ -2225,18 +2227,18 @@ class Client(object):
         with self._callback_mutex:
             if self.on_connect:
                 if sys.version_info[0] < 3:
-                    argcount = self.on_connect.func_code.co_argcount
+                    argcount = self.on_connect.func_code.co_argcount # pylint: disable=no-member
                 else:
-                    argcount = self.on_connect.__code__.co_argcount
+                    argcount = self.on_connect.__code__.co_argcount # pylint: disable=no-member
 
                 if argcount == 3:
                     with self._in_callback:
-                        self.on_connect(self, self._userdata, result)
+                        self.on_connect(self, self._userdata, result) # pylint: disable=not-callable
                 else:
                     flags_dict = {}
                     flags_dict['session present'] = flags & 0x01
                     with self._in_callback:
-                        self.on_connect(self, self._userdata, flags_dict, result)
+                        self.on_connect(self, self._userdata, flags_dict, result) # pylint: disable=not-callable
 
         if result == 0:
             rc = 0
@@ -2298,7 +2300,7 @@ class Client(object):
         with self._callback_mutex:
             if self.on_subscribe:
                 with self._in_callback:  # Don't call loop_write after _send_publish()
-                    self.on_subscribe(self, self._userdata, mid, granted_qos)
+                    self.on_subscribe(self, self._userdata, mid, granted_qos) # pylint: disable=not-callable
 
         return MQTT_ERR_SUCCESS
 
@@ -2430,7 +2432,7 @@ class Client(object):
         with self._callback_mutex:
             if self.on_unsubscribe:
                 with self._in_callback:
-                    self.on_unsubscribe(self, self._userdata, mid)
+                    self.on_unsubscribe(self, self._userdata, mid) # pylint: disable=not-callable
         return MQTT_ERR_SUCCESS
 
     def _do_on_publish(self, idx, mid):
@@ -2438,7 +2440,7 @@ class Client(object):
             if self.on_publish:
                 self._out_message_mutex.release()
                 with self._in_callback:
-                    self.on_publish(self, self._userdata, mid)
+                    self.on_publish(self, self._userdata, mid) # pylint: disable=not-callable
                 self._out_message_mutex.acquire()
 
         msg = self._out_messages.pop(idx)
@@ -2485,7 +2487,7 @@ class Client(object):
 
             if matched == False and self.on_message:
                 with self._in_callback:
-                    self.on_message(self, self._userdata, message)
+                    self.on_message(self, self._userdata, message) # pylint: disable=not-callable
 
     def _thread_main(self):
         self.loop_forever(retry_first_connection=True)
@@ -2497,7 +2499,7 @@ class Mosquitto(Client):
         super(Mosquitto, self).__init__(client_id, clean_session, userdata)
 
 
-class WebsocketWrapper:
+class WebsocketWrapper(object):
     OPCODE_CONTINUATION = 0x0
     OPCODE_TEXT = 0x1
     OPCODE_BINARY = 0x2

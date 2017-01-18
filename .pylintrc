@@ -1,0 +1,12 @@
+[MASTER]
+disable=similarity,format,design,no-self-use,invalid-name,abstract-method,star-args,no-init,locally-disabled,unidiomatic-typecheck,missing-docstring,logging-format-interpolation,fixme,wrong-import-order,broad-except,protected-access,superfluous-parens,simplifiable-if-statement,deprecated-lambda,bad-builtin,duplicate-code
+enable=bad-indentation,mixed-indentation,unnecessary-semicolon,superfluous-parens
+
+ignore=setup.py,tests,docs,paho
+
+[REPORTS]
+
+reports=no
+
+[SIMILARITIES]
+min-similarity-lines=6

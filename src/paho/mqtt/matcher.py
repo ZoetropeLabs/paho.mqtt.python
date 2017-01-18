@@ -42,8 +42,8 @@ class MQTTMatcher(object):
         try:
             parent, node = None, self._root
             for k in key.split('/'):
-                 parent, node = node, node._children[k]
-                 lst.append((parent, k, node))
+                parent, node = node, node._children[k]
+                lst.append((parent, k, node))
             # TODO
             node._content = None
         except KeyError:
@@ -51,7 +51,7 @@ class MQTTMatcher(object):
         else:  # cleanup
             for parent, k, node in reversed(lst):
                 if node._children or node._content is not None:
-                     break
+                    break
                 del parent._children[k]
 
     def iter_match(self, topic):

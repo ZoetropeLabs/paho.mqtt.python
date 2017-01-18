@@ -49,6 +49,7 @@ def _do_publish(c):
 
 
 def _on_connect(c, userdata, flags, rc):
+    # pylint: disable=unused-argument
     """Internal callback"""
     if rc == 0:
         _do_publish(c)
@@ -57,6 +58,7 @@ def _on_connect(c, userdata, flags, rc):
 
 
 def _on_publish(c, userdata, mid):
+    # pylint: disable=unused-argument
     """Internal callback"""
     if len(userdata) == 0:
         c.disconnect()
