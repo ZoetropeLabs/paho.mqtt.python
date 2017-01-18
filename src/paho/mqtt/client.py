@@ -534,7 +534,6 @@ class Client(object):
         self._tls_ca_certs = None
         self._tls_cert_reqs = None
         self._tls_ciphers = None
-        self._tls_version = tls_version
         self._tls_insecure = False
         # No default callbacks
         self._on_log = None
@@ -831,13 +830,13 @@ class Client(object):
             verify_host = not self._tls_insecure
 
             try:
-                self._sock = self._ssl_context.wrap_socket(sock, server_hostname=self._host)
+                sock = self._ssl_context.wrap_socket(self._bare_sock, server_hostname=self._host)
             except ssl.CertificateError:
                 # CertificateError is derived from ValueError
                 raise
             except ValueError:
                 # Python version requires SNI in order to handle server_hostname, but SNI is not available
-                sock = self._ssl_context.wrap_socket(sock)
+                sock = self._ssl_context.wrap_socket(self._bare_sock)
             else:
                 # If SSL context has already checked hostname, then don't need to do it again
                 if (hasattr(self._ssl_context, 'check_hostname') and
@@ -847,12 +846,12 @@ class Client(object):
             if verify_host:
                 ssl.match_hostname(sock.getpeercert(), self._host)
 
-            self._sock.do_handshake()
+            sock.do_handshake()
         else:
-            self._sock = self._bare_sock
+            sock = self._bare_sock
 
         if self._transport == "websockets":
-            self._sock = WebsocketWrapper(self._sock, self._host, self._port,
+            sock = WebsocketWrapper(sock, self._host, self._port,
                 self._get_auth_headers)
 
         self._sock = sock
@@ -2050,7 +2049,7 @@ class Client(object):
         return self._packet_queue(command, packet, 0, 0)
 
     def _send_disconnect(self):
-        self._easy_log(MQTT_LOG_DEBUG, "Sending DISCONNECT")
+        logger.debug("Sending DISCONNECT")
         return self._send_simple_command(DISCONNECT)
 
     def _send_subscribe(self, dup, topics):
