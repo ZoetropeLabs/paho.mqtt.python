@@ -1406,20 +1406,20 @@ class Client(object):
                     rc = 1
                     run = False
 
-            self._state_mutex.acquire()
-            if self._state == mqtt_cs_disconnecting or run is False or self._thread_terminate is True:
+            logger.info("Unexpected return code from loop - %s", rc)
+
+            def should_exit():
+                with self._state_mutex:
+                    return self._state == mqtt_cs_disconnecting or run is False or self._thread_terminate is True
+
+            if should_exit():
                 run = False
-                self._state_mutex.release()
             else:
-                self._state_mutex.release()
                 time.sleep(1)
 
-                self._state_mutex.acquire()
-                if self._state == mqtt_cs_disconnecting or run is False or self._thread_terminate is True:
+                if should_exit():
                     run = False
-                    self._state_mutex.release()
                 else:
-                    self._state_mutex.release()
                     try:
                         self.reconnect()
                     except socket.error as err:
