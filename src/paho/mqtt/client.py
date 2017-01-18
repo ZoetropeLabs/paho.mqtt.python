@@ -2373,9 +2373,8 @@ class Client(object):
                 self._in_messages.pop(i)
                 self._inflight_messages -= 1
                 if self._max_inflight_messages > 0:
-                    self._out_message_mutex.acquire()
-                    rc = self._update_inflight()
-                    self._out_message_mutex.release()
+                    with self._out_message_mutex:
+                        rc = self._update_inflight()
                     if rc != MQTT_ERR_SUCCESS:
                         self._in_message_mutex.release()
                         return rc
