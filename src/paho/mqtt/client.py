@@ -768,9 +768,8 @@ class Client(object):
         self._keepalive = keepalive
         self._bind_address = bind_address
 
-        self._state_mutex.acquire()
-        self._state = mqtt_cs_connect_async
-        self._state_mutex.release()
+        with self._state_mutex:
+            self._state = mqtt_cs_connect_async
 
     def reconnect(self):
         """Reconnect the client after a disconnect. Can only be called after
@@ -790,23 +789,19 @@ class Client(object):
             "to_process": 0,
             "pos": 0}
 
-        self._out_packet_mutex.acquire()
-        self._out_packet = collections.deque()
-        self._out_packet_mutex.release()
+        with self._out_packet_mutex:
+            self._out_packet = collections.deque()
 
-        self._current_out_packet_mutex.acquire()
-        self._current_out_packet = None
-        self._current_out_packet_mutex.release()
+        with self._current_out_packet_mutex:
+            self._current_out_packet = None
 
-        self._msgtime_mutex.acquire()
-        self._last_msg_in = time_func()
-        self._last_msg_out = time_func()
-        self._msgtime_mutex.release()
+        with self._msgtime_mutex:
+            self._last_msg_in = time_func()
+            self._last_msg_out = time_func()
 
         self._ping_t = 0
-        self._state_mutex.acquire()
-        self._state = mqtt_cs_new
-        self._state_mutex.release()
+        with self._state_mutex:
+            self._state = mqtt_cs_new
         self.close_socket()
 
         # Put messages in progress in a valid state.
@@ -1051,9 +1046,8 @@ class Client(object):
 
     def disconnect(self):
         """Disconnect a connected client from the broker."""
-        self._state_mutex.acquire()
-        self._state = mqtt_cs_disconnecting
-        self._state_mutex.release()
+        with self._state_mutex:
+            self._state = mqtt_cs_disconnecting
 
         if self._sock is None:
             return MQTT_ERR_NO_CONN
@@ -1625,9 +1619,8 @@ class Client(object):
         if callback is None or sub is None:
             raise ValueError("sub and callback must both be defined.")
 
-        self._callback_mutex.acquire()
-        self._on_message_filtered[sub] = callback
-        self._callback_mutex.release()
+        with self._callback_mutex:
+            self._on_message_filtered[sub] = callback
 
     def message_callback_remove(self, sub):
         """Remove a message callback previously registered with
@@ -1635,12 +1628,11 @@ class Client(object):
         if sub is None:
             raise ValueError("sub must defined.")
 
-        self._callback_mutex.acquire()
-        try:
-            del self._on_message_filtered[sub]
-        except KeyError:  # no such subscription
-            pass
-        self._callback_mutex.release()
+        with self._callback_mutex:
+            try:
+                del self._on_message_filtered[sub]
+            except KeyError:  # no such subscription
+                pass
 
     # ============================================================
     # Private functions
@@ -1837,17 +1829,17 @@ class Client(object):
             return MQTT_ERR_SUCCESS
 
         now = time_func()
-        self._msgtime_mutex.acquire()
-        last_msg_out = self._last_msg_out
-        last_msg_in = self._last_msg_in
-        self._msgtime_mutex.release()
+
+        with self._msgtime_mutex:
+            last_msg_out = self._last_msg_out
+            last_msg_in = self._last_msg_in
+
         if (self._sock is not None) and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
             if self._state == mqtt_cs_connected and self._ping_t == 0:
                 self._send_pingreq()
-                self._msgtime_mutex.acquire()
-                self._last_msg_out = now
-                self._last_msg_in = now
-                self._msgtime_mutex.release()
+                with self._msgtime_mutex:
+                    self._last_msg_out = now
+                    self._last_msg_in = now
             else:
                 self.close_socket()
 
@@ -2369,9 +2361,8 @@ class Client(object):
         elif message.qos == 2:
             rc = self._send_pubrec(message.mid)
             message.state = mqtt_ms_wait_for_pubrel
-            self._in_message_mutex.acquire()
-            self._in_messages.append(message)
-            self._in_message_mutex.release()
+            with self._in_message_mutex:
+                self._in_messages.append(message)
             return rc
         else:
             return MQTT_ERR_PROTOCOL
