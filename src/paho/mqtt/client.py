@@ -529,12 +529,8 @@ class Client(object):
         self._in_message_mutex = threading.Lock()
         self._thread = None
         self._thread_terminate = False
-        self._tls_certfile = None
-        self._tls_keyfile = None
-        self._tls_ca_certs = None
-        self._tls_cert_reqs = None
-        self._tls_ciphers = None
-        self._tls_insecure = False
+        self._ssl_context = None
+        self._tls_insecure = False  # Only used when SSL context does not have check_hostname attribute
         # No default callbacks
         self._on_log = None
         self._on_connect = None
