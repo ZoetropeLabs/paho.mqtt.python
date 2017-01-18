@@ -469,6 +469,7 @@ class Client(object):
         self._transport = transport
         self._protocol = protocol
         self._userdata = userdata
+        self._bare_sock = None
         self._sock = None
         self._sockpairR, self._sockpairW = _socketpair_compat()
         self._keepalive = 60
@@ -797,14 +798,10 @@ class Client(object):
         # Put messages in progress in a valid state.
         self._messages_reconnect_reset()
 
-        try:
-            if (sys.version_info[0] == 2 and sys.version_info[1] < 7) or (sys.version_info[0] == 3 and sys.version_info[1] < 2):
-                self._bare_sock = socket.create_connection((self._host, self._port))
-            else:
-                self._bare_sock = socket.create_connection((self._host, self._port), source_address=(self._bind_address, 0))
-        except socket.error as err:
-            if err.errno != errno.EINPROGRESS and err.errno != errno.EWOULDBLOCK and err.errno != EAGAIN:
-                raise
+        if (sys.version_info[0] == 2 and sys.version_info[1] < 7) or (sys.version_info[0] == 3 and sys.version_info[1] < 2):
+            self._bare_sock = socket.create_connection((self._host, self._port))
+        else:
+            self._bare_sock = socket.create_connection((self._host, self._port), source_address=(self._bind_address, 0))
 
         if self.has_ssl():
             verify_host = not self._tls_insecure
