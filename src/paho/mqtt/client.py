@@ -247,7 +247,7 @@ def _socketpair_compat():
     listensock.bind(("127.0.0.1", 0))
     listensock.listen(1)
 
-    iface, port = listensock.getsockname()
+    _, port = listensock.getsockname()
     sock1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_IP)
     sock1.setblocking(0)
     try:
@@ -308,7 +308,7 @@ class MQTTMessageInfo(object):
 
     def wait_for_publish(self):
         """Block until the message associated with this object is published."""
-        while self._published == False:
+        while (not self._published):
             time.sleep(1)
 
     def is_published(self):
