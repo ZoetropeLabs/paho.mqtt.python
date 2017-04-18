@@ -452,8 +452,7 @@ class Client(object):
 
     """
     def __init__(self, client_id="", clean_session=True, userdata=None,
-            protocol=MQTTv311, transport="tcp", get_auth_headers=None,
-            tls_opts=None):
+            protocol=MQTTv311, transport="tcp"):
         """client_id is the unique client id string used when connecting to the
         broker. If client_id is zero length or None, then the behaviour is
         defined by which protocol version is in use. If using MQTT v3.1.1, then
@@ -563,11 +562,8 @@ class Client(object):
         self._on_publish = None
         self._on_unsubscribe = None
         self._on_disconnect = None
-
-        self._get_auth_headers = get_auth_headers
-
-        if tls_opts:
-            self.tls_set(**tls_opts)
+        self._websocket_path = "/mqtt"
+        self._websocket_extra_headers = None
 
     def __del__(self):
         pass
@@ -583,6 +579,25 @@ class Client(object):
             self._sockpairW = None
 
         self.__init__(client_id, clean_session, userdata)
+
+    def ws_set_options(self, path="/mqtt", headers=None):
+        """ Set the path and headers for a websocket connection
+
+        path is a string starting with / which should be the endpoint of the
+        mqtt connection on the remote server
+
+        headers can be either a dict or a callable object. If it is a dict then
+        the extra items in the dict are added to the websocket headers. If it is
+        a callable, then the default websocket headers are passed into this
+        function and the result is used as the new headers.
+        """
+        self._websocket_path = path
+
+        if headers is not None:
+            if isinstance(headers, dict) or callable(headers):
+                self._websocket_extra_headers = headers
+            else:
+                raise ValueError("'headers' option to ws_set_options has to be either a dictionary or callable")
 
     def tls_set_context(self, context=None):
         """Configure network encryption and authentication context. Enables SSL/TLS support.
@@ -879,7 +894,9 @@ class Client(object):
             sock.do_handshake()
 
         if self._transport == "websockets":
-            sock = WebsocketWrapper(sock, self._host, self._port, self.has_ssl())
+            sock.settimeout(self._keepalive)
+            sock = WebsocketWrapper(sock, self._host, self._port, self._ssl,
+                self._websocket_path, self._websocket_extra_headers)
 
         self._sock = sock
         self._sock.setblocking(0)
@@ -2577,7 +2594,7 @@ class WebsocketWrapper(object):
     OPCODE_PING = 0x9
     OPCODE_PONG = 0xa
 
-    def __init__(self, socket, host, port, is_ssl, get_auth_headers=None):
+    def __init__(self, socket, host, port, is_ssl, path, extra_headers):
 
         self.connected = False
 
@@ -2585,6 +2602,7 @@ class WebsocketWrapper(object):
         self._host = host
         self._port = port
         self._socket = socket
+        self._path = path
 
         self._sendbuffer = bytearray()
         self._readbuffer = bytearray()
@@ -2593,14 +2611,14 @@ class WebsocketWrapper(object):
         self._payload_head = 0
         self._readbuffer_head = 0
 
-        self._do_handshake(get_auth_headers)
+        self._do_handshake(extra_headers)
 
     def __del__(self):
 
         self._sendbuffer = None
         self._readbuffer = None
 
-    def _do_handshake(self, get_auth_headers):
+    def _do_handshake(self, extra_headers):
 
         sec_websocket_key = uuid.uuid4().bytes
         sec_websocket_key = base64.b64encode(sec_websocket_key)
@@ -2615,11 +2633,15 @@ class WebsocketWrapper(object):
             "Sec-Websocket-Protocol": "mqtt",
         }
 
-        if get_auth_headers:
-            websocket_headers = get_auth_headers(websocket_headers)
+        # This is checked in ws_set_options so it will either be None, a
+        # dictionary, or a callable
+        if isinstance(extra_headers, dict):
+            websocket_headers.update(extra_headers)
+        elif callable(extra_headers):
+            websocket_headers = extra_headers(websocket_headers)
 
         header = "\r\n".join([
-            "GET /mqtt HTTP/1.1",
+            "GET {self._path} HTTP/1.1".format(self=self),
             "\r\n".join(sorted("{}: {}".format(i, j) for i, j in websocket_headers.items())),
             "\r\n",
         ]).encode("utf8")
