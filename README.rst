@@ -5,7 +5,7 @@ This document describes the source code for the `Eclipse Paho <http://eclipse.or
 
 This code provides a client class which enable applications to connect to an `MQTT <http://mqtt.org/>`_ broker to publish messages, and to subscribe to topics and receive published messages. It also provides some helper functions to make publishing one off messages to an MQTT server very straightforward.
 
-It supports Python 2.7 or 3.2+, with limited support for Python 2.6.
+It supports Python 2.7.9+ or 3.4+, with limited support for Python 2.7 before 2.7.9.
 
 The MQTT protocol is a machine-to-machine (M2M)/"Internet of Things" connectivity protocol. Designed as an extremely lightweight publish/subscribe messaging transport, it is useful for connections with remote locations where a small code footprint is required and/or network bandwidth is at a premium.
 
@@ -233,7 +233,7 @@ tls_set()
 ::
 
     tls_set(ca_certs=None, certfile=None, keyfile=None, cert_reqs=ssl.CERT_REQUIRED,
-        tls_version=ssl.PROTOCOL_TLSv1, ciphers=None)
+        tls_version=ssl.PROTOCOL_TLS, ciphers=None)
 
 Configure network encryption and authentication options. Enables SSL/TLS support.
 
@@ -247,7 +247,7 @@ cert_reqs
     defines the certificate requirements that the client imposes on the broker. By default this is ``ssl.CERT_REQUIRED``, which means that the broker must provide a certificate. See the ssl pydoc for more information on this parameter.
 
 tls_version
-    specifies the version of the SSL/TLS protocol to be used. By default TLS v1 is used. Previous versions (all versions beginning with SSL) are possible but not recommended due to possible security problems.
+    specifies the version of the SSL/TLS protocol to be used. By default (if the python version supports it) the highest TLS version is detected. If unavailable, TLS v1 is used. Previous versions (all versions beginning with SSL) are possible but not recommended due to possible security problems.
 
 ciphers
     a string specifying which encryption ciphers are allowable for this connection, or ``None`` to use the defaults. See the ssl pydoc for more information.
@@ -1281,7 +1281,7 @@ Callback Example
 Reporting bugs
 --------------
 
-Please report bugs under the "MQTT-Python" Component in `Eclipse Bugzilla <http://bugs.eclipse.org/bugs/>`_ for the Paho Technology project.
+Please report bugs in the issues tracker at https://github.com/eclipse/paho.mqtt.python/issues.
 
 More information
 ----------------
