@@ -2380,7 +2380,7 @@ class Client(object):
         logger.debug(
             "Received PUBLISH (d"+str(message.dup)+
             ", q"+str(message.qos)+", r"+str(message.retain)+
-            ", m"+str(message.mid)+", '"+message.topic+
+            ", m"+str(message.mid)+", '"+print_topic+
             "', ...  ("+str(len(message.payload))+" bytes)")
 
         message.timestamp = time_func()
