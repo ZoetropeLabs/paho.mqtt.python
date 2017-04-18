@@ -895,7 +895,7 @@ class Client(object):
 
         if self._transport == "websockets":
             sock.settimeout(self._keepalive)
-            sock = WebsocketWrapper(sock, self._host, self._port, self._ssl,
+            sock = WebsocketWrapper(sock, self._host, self._port, self.has_ssl(),
                 self._websocket_path, self._websocket_extra_headers)
 
         self._sock = sock
@@ -1904,7 +1904,7 @@ class Client(object):
     def _easy_log(self, level, fmt, *args):
         if self.on_log:
             buf = fmt % args
-            self.on_log(self, self._userdata, level, buf)
+            self.on_log(self, self._userdata, level, buf) # pylint: disable=not-callable
         if self._logger:
             level_std = LOGGING_LEVEL[level]
             self._logger.log(level_std, fmt, *args)
@@ -2523,7 +2523,7 @@ class Client(object):
         with self._callback_mutex:
             if self.on_unsubscribe:
                 with self._in_callback:
-                    self.on_unsubscribe(self, self._userdata, mid)
+                    self.on_unsubscribe(self, self._userdata, mid) # pylint: disable=not-callable
         return MQTT_ERR_SUCCESS
 
     def _do_on_publish(self, idx, mid):
