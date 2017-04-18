@@ -2833,7 +2833,7 @@ class WebsocketWrapper(object):
     def pending(self):
         # Fix for bug #131: a SSL socket may still have data available
         # for reading without select() being aware of it.
-        if self.is_ssl:
+        if self._is_ssl:
             return self._socket.pending()
         else:
             # normal socket rely only on select()
