@@ -820,10 +820,6 @@ class Client(object):
         self._state = mqtt_cs_new
         self.close_socket()
 
-        if self._sock:
-            self._sock.close()
-            self._sock = None
-
         # Put messages in progress in a valid state.
         self._messages_reconnect_reset()
 
@@ -860,7 +856,6 @@ class Client(object):
                     verify_host = False
 
             sock.settimeout(self._keepalive)
-            sock.do_handshake()
 
             if verify_host:
                 ssl.match_hostname(sock.getpeercert(), self._host)
@@ -868,7 +863,6 @@ class Client(object):
             sock.do_handshake()
 
         if self._transport == "websockets":
-            sock.settimeout(self._keepalive)
             sock = WebsocketWrapper(sock, self._host, self._port, self.has_ssl())
 
         self._sock = sock
@@ -1385,11 +1379,6 @@ class Client(object):
         if self._sock:
             self._sock.close()
             self._sock = None
-            self._bare_sock = None
-
-    def check_state_safe(self, state):
-        with self._state_mutex:
-            return self._state == state
 
     def loop_forever(self, timeout=1.0, max_packets=1, retry_first_connection=False):
         """This function call loop() for you in an infinite blocking loop. It
@@ -1414,7 +1403,7 @@ class Client(object):
             if self._thread_terminate is True:
                 break
 
-            if self.check_state_safe(mqtt_cs_connect_async):
+            if self._state == mqtt_cs_connect_async:
                 try:
                     self.reconnect()
                 except (socket.error, WebsocketConnectionError):
@@ -1876,7 +1865,7 @@ class Client(object):
             else:
                 self.close_socket()
 
-                if self.check_state_safe(mqtt_cs_disconnecting):
+                if self._state == mqtt_cs_disconnecting:
                     rc = MQTT_ERR_SUCCESS
                 else:
                     rc = 1
