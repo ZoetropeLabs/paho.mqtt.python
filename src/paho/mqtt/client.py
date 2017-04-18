@@ -31,16 +31,13 @@ except ImportError:
 import struct
 import sys
 import threading
-import logging
 
 import time
 import uuid
 import base64
 import string
 import hashlib
-
-from .matcher import MQTTMatcher
-
+import logging
 logger = logging.getLogger(__name__)
 
 try:
@@ -55,6 +52,8 @@ except ImportError:
     HAVE_DNS = False
 else:
     HAVE_DNS = True
+
+from .matcher import MQTTMatcher
 
 if platform.system() == 'Windows':
     EAGAIN = errno.WSAEWOULDBLOCK # pylint: disable=no-member
@@ -446,6 +445,11 @@ class Client(object):
       request. The mid variable matches the mid variable returned from the
       corresponding unsubscribe() call.
 
+    on_log(client, userdata, level, buf): called when the client has log information. Define
+      to allow debugging. The level variable gives the severity of the message
+      and will be one of MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING,
+      MQTT_LOG_ERR, and MQTT_LOG_DEBUG. The message itself is in buf.
+
     """
     def __init__(self, client_id="", clean_session=True, userdata=None,
             protocol=MQTTv311, transport="tcp", get_auth_headers=None,
@@ -550,6 +554,7 @@ class Client(object):
         self._thread_terminate = False
         self._ssl_context = None
         self._tls_insecure = False  # Only used when SSL context does not have check_hostname attribute
+        self._logger = None
         # No default callbacks
         self._on_log = None
         self._on_connect = None
@@ -705,6 +710,17 @@ class Client(object):
             # If verify_mode is CERT_NONE then the host name will never be checked
             self._ssl_context.check_hostname = not value
 
+    def enable_logger(self, logger=None):
+        if not logger:
+            if self._logger:
+                # Do not replace existing logger
+                return
+            logger = logging.getLogger(__name__)
+        self._logger = logger
+
+    def disable_logger(self):
+        self._logger = None
+
     def connect(self, host, port=1883, keepalive=60, bind_address=""):
         """Connect to a remote broker.
 
@@ -736,7 +752,7 @@ class Client(object):
 
         try:
             rr = '_mqtt._tcp.%s' % domain
-            if self.has_ssl() is not None:
+            if self.has_ssl():
                 # IANA specifies secure-mqtt (not mqtts) for port 8883
                 rr = '_secure-mqtt._tcp.%s' % domain
             answers = []
@@ -1479,6 +1495,28 @@ class Client(object):
             self._thread = None
 
     @property
+    def on_log(self):
+        """If implemented, called when the client has log information.
+        Defined to allow debugging."""
+        return self._on_log
+
+    @on_log.setter
+    def on_log(self, func):
+        """ Define the logging callback implementation.
+
+        Expected signature is:
+            log_callback(client, userdata, level, buf)
+
+        client:     the client instance for this callback
+        userdata:   the private user data as set in Client() or userdata_set()
+        level:      gives the severity of the message and will be one of
+                    MQTT_LOG_INFO, MQTT_LOG_NOTICE, MQTT_LOG_WARNING,
+                    MQTT_LOG_ERR, and MQTT_LOG_DEBUG.
+        buf:        the message itself
+        """
+        self._on_log = func
+
+    @property
     def on_connect(self):
         """If implemented, called when the broker responds to our connection
         request."""
@@ -1846,6 +1884,14 @@ class Client(object):
 
         return MQTT_ERR_SUCCESS
 
+    def _easy_log(self, level, fmt, *args):
+        if self.on_log:
+            buf = fmt % args
+            self.on_log(self, self._userdata, level, buf)
+        if self._logger:
+            level_std = LOGGING_LEVEL[level]
+            self._logger.log(level_std, fmt, *args)
+
     def _check_keepalive(self):
         if self._keepalive == 0:
             return MQTT_ERR_SUCCESS
@@ -2070,10 +2116,9 @@ class Client(object):
         self._pack_remaining_length(packet, remaining_length)
         local_mid = self._mid_generate()
         packet.extend(struct.pack("!H", local_mid))
-        for t in topics:
-            self._pack_str16(packet, t[0])
-            packet.extend(struct.pack("B", t[1]))
-        logger.debug("Queueing SUBSCRIBE packet")
+        for t, q in topics:
+            self._pack_str16(packet, t)
+            packet.append(q)
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _send_unsubscribe(self, dup, topics):
@@ -2089,7 +2134,9 @@ class Client(object):
         packet.extend(struct.pack("!H", local_mid))
         for t in topics:
             self._pack_str16(packet, t)
-        logger.debug("Queueing UNSUBSCRIBE packet")
+
+        # topics_repr = ", ".join("'"+topic.decode('utf8')+"'" for topic in topics)
+        self._easy_log(MQTT_LOG_DEBUG, "Sending UNSUBSCRIBE (d%d) %s", dup, topics)
         return (self._packet_queue(command, packet, local_mid, 1), local_mid)
 
     def _message_retry_check_actual(self, messages, mutex):
@@ -2534,10 +2581,10 @@ class WebsocketWrapper(object):
 
         self.connected = False
 
+        self._is_ssl = is_ssl
         self._host = host
         self._port = port
         self._socket = socket
-        self._is_ssl = is_ssl
 
         self._sendbuffer = bytearray()
         self._readbuffer = bytearray()
