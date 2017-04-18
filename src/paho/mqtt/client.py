@@ -541,11 +541,10 @@ class Client(object):
         self._in_callback = threading.Lock()
         self._strict_protocol = False
         self._callback_mutex = threading.RLock()
-        self._state_mutex = threading.Lock()
         self._out_packet_mutex = threading.Lock()
-        self._current_out_packet_mutex = threading.Lock()
+        self._current_out_packet_mutex = threading.RLock()
         self._msgtime_mutex = threading.Lock()
-        self._out_message_mutex = threading.Lock()
+        self._out_message_mutex = threading.RLock()
         self._in_message_mutex = threading.Lock()
         self._thread = None
         self._thread_terminate = False
@@ -787,8 +786,7 @@ class Client(object):
         self._keepalive = keepalive
         self._bind_address = bind_address
 
-        with self._state_mutex:
-            self._state = mqtt_cs_connect_async
+        self._state = mqtt_cs_connect_async
 
     def reconnect(self):
         """Reconnect the client after a disconnect. Can only be called after
@@ -819,9 +817,12 @@ class Client(object):
             self._last_msg_out = time_func()
 
         self._ping_t = 0
-        with self._state_mutex:
-            self._state = mqtt_cs_new
+        self._state = mqtt_cs_new
         self.close_socket()
+
+        if self._sock:
+            self._sock.close()
+            self._sock = None
 
         # Put messages in progress in a valid state.
         self._messages_reconnect_reset()
@@ -898,14 +899,15 @@ class Client(object):
         if timeout < 0.0:
             raise ValueError('Invalid timeout.')
 
-        with self._current_out_packet_mutex, self._out_packet_mutex:
-            if self._current_out_packet is None and len(self._out_packet) > 0:
-                self._current_out_packet = self._out_packet.popleft()
+        with self._current_out_packet_mutex:
+            with self._out_packet_mutex:
+                if self._current_out_packet is None and len(self._out_packet) > 0:
+                    self._current_out_packet = self._out_packet.popleft()
 
-            if self._current_out_packet:
-                wlist = [self._sock]
-            else:
-                wlist = []
+                if self._current_out_packet:
+                    wlist = [self._sock]
+                else:
+                    wlist = []
 
         # used to check if there are any bytes left in the (SSL) socket
         pending_bytes = 0
@@ -1031,37 +1033,32 @@ class Client(object):
             message.retain = retain
             message.dup = False
 
-            self._out_message_mutex.acquire()
+            with self._out_message_mutex:
+                if self._max_queued_messages > 0 and len(self._out_messages) >= self._max_queued_messages:
+                    return (MQTT_ERR_QUEUE_SIZE, local_mid)
 
-            if self._max_queued_messages > 0 and len(self._out_messages) >= self._max_queued_messages:
-                self._out_message_mutex.release()
-                return (MQTT_ERR_QUEUE_SIZE, local_mid)
+                self._out_messages.append(message)
+                if self._max_inflight_messages == 0 or self._inflight_messages < self._max_inflight_messages:
+                    self._inflight_messages += 1
+                    if qos == 1:
+                        message.state = mqtt_ms_wait_for_puback
+                    elif qos == 2:
+                        message.state = mqtt_ms_wait_for_pubrec
 
-            self._out_messages.append(message)
-            if self._max_inflight_messages == 0 or self._inflight_messages < self._max_inflight_messages:
-                self._inflight_messages += 1
-                if qos == 1:
-                    message.state = mqtt_ms_wait_for_puback
-                elif qos == 2:
-                    message.state = mqtt_ms_wait_for_pubrec
-                self._out_message_mutex.release()
+                    rc = self._send_publish(message.mid, message.topic, message.payload, message.qos, message.retain,
+                                            message.dup)
 
-                rc = self._send_publish(message.mid, message.topic, message.payload, message.qos, message.retain,
-                                        message.dup)
-
-                # remove from inflight messages so it will be send after a connection is made
-                if rc is MQTT_ERR_NO_CONN:
-                    with self._out_message_mutex:
+                    # remove from inflight messages so it will be send after a connection is made
+                    if rc is MQTT_ERR_NO_CONN:
                         self._inflight_messages -= 1
                         message.state = mqtt_ms_publish
 
-                message.info.rc = rc
-                return message.info
-            else:
-                message.state = mqtt_ms_queued
-                self._out_message_mutex.release()
-                message.info.rc = MQTT_ERR_SUCCESS
-                return message.info
+                    message.info.rc = rc
+                    return message.info
+                else:
+                    message.state = mqtt_ms_queued
+                    message.info.rc = MQTT_ERR_SUCCESS
+                    return message.info
 
     def username_pw_set(self, username, password=None):
         """Set a username and optionally a password for broker authentication.
@@ -1083,8 +1080,7 @@ class Client(object):
 
     def disconnect(self):
         """Disconnect a connected client from the broker."""
-        with self._state_mutex:
-            self._state = mqtt_cs_disconnecting
+        self._state = mqtt_cs_disconnecting
 
         if self._sock is None:
             return MQTT_ERR_NO_CONN
@@ -1282,7 +1278,7 @@ class Client(object):
             # This hasn't happened in the keepalive time so we should disconnect.
             self.close_socket()
 
-            if self.check_state_safe(mqtt_cs_disconnecting):
+            if self._state == mqtt_cs_disconnecting:
                 rc = MQTT_ERR_SUCCESS
             else:
                 rc = 1
@@ -1448,7 +1444,7 @@ class Client(object):
             logger.info("Unexpected return code from loop - %s", rc)
 
             def should_exit():
-                return self.check_state_safe(mqtt_cs_disconnecting) or run is False or self._thread_terminate is True
+                return self._state == mqtt_cs_disconnecting or run is False or self._thread_terminate is True
 
             if should_exit():
                 run = False
@@ -1687,7 +1683,7 @@ class Client(object):
         if rc:
             self.close_socket()
 
-            if self.check_state_safe(mqtt_cs_disconnecting):
+            if self._state == mqtt_cs_disconnecting:
                 rc = MQTT_ERR_SUCCESS
 
             with self._callback_mutex:
@@ -1871,8 +1867,8 @@ class Client(object):
             last_msg_out = self._last_msg_out
             last_msg_in = self._last_msg_in
 
-        if (self._sock is not None) and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
-            if self.check_state_safe(mqtt_cs_connected) and self._ping_t == 0:
+        if self._sock is not None and (now - last_msg_out >= self._keepalive or now - last_msg_in >= self._keepalive):
+            if self._state == mqtt_cs_connected and self._ping_t == 0:
                 self._send_pingreq()
                 with self._msgtime_mutex:
                     self._last_msg_out = now
@@ -2263,14 +2259,14 @@ class Client(object):
         if result == 0:
             self._state = mqtt_cs_connected
 
-        logger.debug("Received CONNACK ("+str(flags)+", "+str(result)+")")
+        self._easy_log(MQTT_LOG_DEBUG, "Received CONNACK (%s, %s)", flags, result)
 
         with self._callback_mutex:
             if self.on_connect:
                 if sys.version_info[0] < 3:
-                    argcount = self.on_connect.func_code.co_argcount # pylint: disable=no-member
+                    argcount = self.on_connect.func_code.co_argcount
                 else:
-                    argcount = self.on_connect.__code__.co_argcount # pylint: disable=no-member
+                    argcount = self.on_connect.__code__.co_argcount
 
                 if argcount == 3:
                     with self._in_callback:
@@ -2409,7 +2405,7 @@ class Client(object):
             return MQTT_ERR_PROTOCOL
 
         mid, = struct.unpack("!H", self._in_packet['packet'])
-        logger.debug("Received PUBREL (Mid: "+str(mid)+")")
+        self._easy_log(MQTT_LOG_DEBUG, "Received PUBREL (Mid: %d)", mid)
 
         with self._in_message_mutex:
             for i in range(len(self._in_messages)):
@@ -2470,20 +2466,18 @@ class Client(object):
                 return MQTT_ERR_PROTOCOL
 
         mid, = struct.unpack("!H", self._in_packet['packet'])
-        logger.debug("Received UNSUBACK (Mid: "+str(mid)+")")
+        self._easy_log(MQTT_LOG_DEBUG, "Received UNSUBACK (Mid: %d)", mid)
         with self._callback_mutex:
             if self.on_unsubscribe:
                 with self._in_callback:
-                    self.on_unsubscribe(self, self._userdata, mid) # pylint: disable=not-callable
+                    self.on_unsubscribe(self, self._userdata, mid)
         return MQTT_ERR_SUCCESS
 
     def _do_on_publish(self, idx, mid):
         with self._callback_mutex:
             if self.on_publish:
-                self._out_message_mutex.release()
                 with self._in_callback:
                     self.on_publish(self, self._userdata, mid) # pylint: disable=not-callable
-                self._out_message_mutex.acquire()
 
         msg = self._out_messages.pop(idx)
         if msg.qos > 0:
