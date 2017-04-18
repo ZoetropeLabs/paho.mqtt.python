@@ -2547,13 +2547,14 @@ class WebsocketWrapper(object):
     OPCODE_PING = 0x9
     OPCODE_PONG = 0xa
 
-    def __init__(self, socket, host, port, get_auth_headers=None):
+    def __init__(self, socket, host, port, is_ssl, get_auth_headers=None):
 
         self.connected = False
 
         self._host = host
         self._port = port
         self._socket = socket
+        self._is_ssl = is_ssl
 
         self._sendbuffer = bytearray()
         self._readbuffer = bytearray()
@@ -2832,7 +2833,7 @@ class WebsocketWrapper(object):
     def pending(self):
         # Fix for bug #131: a SSL socket may still have data available
         # for reading without select() being aware of it.
-        if self.has_ssl():
+        if self.is_ssl:
             return self._socket.pending()
         else:
             # normal socket rely only on select()
