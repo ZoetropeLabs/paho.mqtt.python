@@ -60,16 +60,8 @@ if platform.system() == 'Windows':
 else:
     EAGAIN = errno.EAGAIN
 
-VERSION_MAJOR=1
-VERSION_MINOR=2
-VERSION_REVISION=3
-VERSION_NUMBER=(VERSION_MAJOR*1000000+VERSION_MINOR*1000+VERSION_REVISION)
-
 MQTTv31 = 3
 MQTTv311 = 4
-
-PROTOCOL_NAMEv31 = "MQIsdp"
-PROTOCOL_NAMEv311 = "MQTT"
 
 if sys.version_info[0] >= 3:
     # define some alias for python2 compatibility
@@ -152,10 +144,7 @@ MQTT_ERR_UNKNOWN = 13
 MQTT_ERR_ERRNO = 14
 MQTT_ERR_QUEUE_SIZE = 15
 
-if sys.version_info[0] < 3:
-    sockpair_data = "0"
-else:
-    sockpair_data = b"0"
+sockpair_data = b"0"
 
 
 class WebsocketConnectionError(ValueError):
@@ -2061,14 +2050,11 @@ class Client(object):
         return self._packet_queue(command, packet, 0, 0)
 
     def _send_connect(self, keepalive, clean_session):
-        if self._protocol == MQTTv31:
-            protocol = PROTOCOL_NAMEv31
-            proto_ver = 3
-        else:
-            protocol = PROTOCOL_NAMEv311
-            proto_ver = 4
-        protocol = protocol.encode('utf-8')
+        proto_ver = self._protocol
+        protocol = b"MQTT" if proto_ver >= MQTTv311 else b"MQIsdp"  # hard-coded UTF-8 encoded string
+
         remaining_length = 2 + len(protocol) + 1 + 1 + 2 + 2 + len(self._client_id)
+
         connect_flags = 0
         if clean_session:
             connect_flags |= 0x02
@@ -2426,11 +2412,12 @@ class Client(object):
 
         message.payload = packet
 
-        logger.debug(
-            "Received PUBLISH (d"+str(message.dup)+
-            ", q"+str(message.qos)+", r"+str(message.retain)+
-            ", m"+str(message.mid)+", '"+print_topic+
-            "', ...  ("+str(len(message.payload))+" bytes)")
+        self._easy_log(
+            MQTT_LOG_DEBUG,
+            "Received PUBLISH (d%d, q%d, r%d, m%d), '%s', ...  (%d bytes)",
+            message.dup, message.qos, message.retain, message.mid,
+            print_topic, len(message.payload)
+        )
 
         message.timestamp = time_func()
         if message.qos == 0:
@@ -2567,10 +2554,16 @@ class Client(object):
     def _handle_on_message(self, message):
         matched = False
         with self._callback_mutex:
-            for callback in self._on_message_filtered.iter_match(message.topic):
-                with self._in_callback:
-                    callback(self, self._userdata, message)
-                matched = True
+            try:
+                topic = message.topic
+            except UnicodeDecodeError:
+                topic = None
+
+            if topic is not None:
+                for callback in self._on_message_filtered.iter_match(message.topic):
+                    with self._in_callback:
+                        callback(self, self._userdata, message)
+                    matched = True
 
             if matched == False and self.on_message:
                 with self._in_callback:
@@ -2628,7 +2621,7 @@ class WebsocketWrapper(object):
             "Upgrade": "websocket",
             "Connection": "Upgrade",
             "Origin": "https://{self._host:s}:{self._port:d}".format(self=self),
-            "Sec-WebSocket-Key": sec_websocket_key,
+            "Sec-WebSocket-Key": sec_websocket_key.decode("utf8"),
             "Sec-Websocket-Version": "13",
             "Sec-Websocket-Protocol": "mqtt",
         }
@@ -2642,11 +2635,9 @@ class WebsocketWrapper(object):
 
         header = "\r\n".join([
             "GET {self._path} HTTP/1.1".format(self=self),
-            "\r\n".join(sorted("{}: {}".format(i, j) for i, j in websocket_headers.items())),
+            "\r\n".join("{}: {}".format(i, j) for i, j in websocket_headers.items()),
             "\r\n",
         ]).encode("utf8")
-
-        logger.debug("Connecting to websockets with headers:\n%s", header)
 
         sent = self._socket.send(header)
 
@@ -2660,6 +2651,7 @@ class WebsocketWrapper(object):
             byte = self._socket.recv(1)
 
             self._readbuffer.extend(byte)
+
             # line end
             if byte == b"\n":
                 if len(self._readbuffer) > 2:
