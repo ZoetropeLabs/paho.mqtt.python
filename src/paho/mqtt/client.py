@@ -338,6 +338,16 @@ class MQTTMessage(object):
         self.retain = False
         self.info = MQTTMessageInfo(mid)
 
+    def __eq__(self, other):
+        """Override the default Equals behavior"""
+        if isinstance(other, self.__class__):
+            return self.mid == other.mid
+        return False
+
+    def __ne__(self, other):
+        """Define a non-equality test"""
+        return not self.__eq__(other)
+
     @property
     def topic(self):
         if sys.version_info[0] >= 3:
@@ -446,7 +456,7 @@ class Client(object):
         broker. If client_id is zero length or None, then the behaviour is
         defined by which protocol version is in use. If using MQTT v3.1.1, then
         a zero length client id will be sent to the broker and the broker will
-        generate a random for the client. If using MQGG v3.1 then an id will be
+        generate a random for the client. If using MQTT v3.1 then an id will be
         randomly generated. In both cases, clean_session must be True. If this
         is not the case a ValueError will be raised.
 
@@ -513,6 +523,9 @@ class Client(object):
         self._current_out_packet = None
         self._last_msg_in = time_func()
         self._last_msg_out = time_func()
+        self._reconnect_min_delay = 1
+        self._reconnect_max_delay = 120
+        self._reconnect_delay = None
         self._ping_t = 0
         self._last_mid = 0
         self._state = mqtt_cs_new
@@ -538,6 +551,7 @@ class Client(object):
         self._msgtime_mutex = threading.Lock()
         self._out_message_mutex = threading.RLock()
         self._in_message_mutex = threading.Lock()
+        self._reconnect_delay_mutex = threading.Lock()
         self._thread = None
         self._thread_terminate = False
         self._ssl_context = None
@@ -807,6 +821,19 @@ class Client(object):
         self._bind_address = bind_address
 
         self._state = mqtt_cs_connect_async
+
+    def reconnect_delay_set(self, min_delay=1, max_delay=120):
+        """ Configure the exponential reconnect delay
+
+            When connection is lost, wait initially min_delay seconds and
+            double this time every attempt. The wait is capped at max_delay.
+            Once the client is fully connected (e.g. not only TCP socket, but
+            received a success CONNACK), the wait timer is reset to min_delay.
+        """
+        with self._reconnect_delay_mutex:
+            self._reconnect_min_delay = min_delay
+            self._reconnect_max_delay = min_delay
+            self._reconnect_delay = None
 
     def reconnect(self):
         """Reconnect the client after a disconnect. Can only be called after
@@ -1082,9 +1109,9 @@ class Client(object):
         Must be called before connect() to have any effect.
         Requires a broker that supports MQTT v3.1.
 
-        username: The username to authenticate with. Need have no relationship to the client id. Must be unicode    
+        username: The username to authenticate with. Need have no relationship to the client id. Must be unicode
             [MQTT-3.1.3-11].
-        password: The password to authenticate with. Optional, set to None if not required. If it is unicode, then it 
+        password: The password to authenticate with. Optional, set to None if not required. If it is unicode, then it
             will be encoded as UTF-8.
         """
 
@@ -1431,8 +1458,8 @@ class Client(object):
                 except (socket.error, WebsocketConnectionError):
                     if not retry_first_connection:
                         raise
-                    logger.debug("Connection failed, retrying")
-                    time.sleep(1)
+                    self._easy_log(MQTT_LOG_DEBUG, "Connection failed, retrying")
+                    self._reconnect_wait()
             else:
                 break
 
@@ -1460,7 +1487,7 @@ class Client(object):
             if should_exit():
                 run = False
             else:
-                time.sleep(1)
+                self._reconnect_wait()
 
                 if should_exit():
                     run = False
@@ -2297,24 +2324,16 @@ class Client(object):
 
         if result == 0:
             self._state = mqtt_cs_connected
+            self._reconnect_delay = None
 
         self._easy_log(MQTT_LOG_DEBUG, "Received CONNACK (%s, %s)", flags, result)
 
         with self._callback_mutex:
             if self.on_connect:
-                if sys.version_info[0] < 3:
-                    argcount = self.on_connect.func_code.co_argcount
-                else:
-                    argcount = self.on_connect.__code__.co_argcount
-
-                if argcount == 3:
-                    with self._in_callback:
-                        self.on_connect(self, self._userdata, result) # pylint: disable=not-callable
-                else:
-                    flags_dict = {}
-                    flags_dict['session present'] = flags & 0x01
-                    with self._in_callback:
-                        self.on_connect(self, self._userdata, flags_dict, result) # pylint: disable=not-callable
+                flags_dict = {}
+                flags_dict['session present'] = flags & 0x01
+                with self._in_callback:
+                    self.on_connect(self, self._userdata, flags_dict, result)
 
         if result == 0:
             rc = 0
@@ -2431,7 +2450,8 @@ class Client(object):
             rc = self._send_pubrec(message.mid)
             message.state = mqtt_ms_wait_for_pubrel
             with self._in_message_mutex:
-                self._in_messages.append(message)
+                if message not in self._in_messages:
+                    self._in_messages.append(message)
             return rc
         else:
             return MQTT_ERR_PROTOCOL
@@ -2571,6 +2591,28 @@ class Client(object):
 
     def _thread_main(self):
         self.loop_forever(retry_first_connection=True)
+
+    def _reconnect_wait(self):
+        # See reconnect_delay_set for details
+        now = time_func()
+        with self._reconnect_delay_mutex:
+            if self._reconnect_delay is None:
+                self._reconnect_delay = self._reconnect_min_delay
+            else:
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2,
+                    self._reconnect_max_delay,
+                )
+
+            target_time = now + self._reconnect_delay
+
+        remaining = target_time - now
+        while (self._state != mqtt_cs_disconnecting
+                and not self._thread_terminate
+                and remaining > 0):
+
+            time.sleep(min(remaining, 1))
+            remaining = target_time - time_func()
 
 
 # Compatibility class for easy porting from mosquitto.py.
