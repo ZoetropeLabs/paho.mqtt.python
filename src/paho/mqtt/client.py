@@ -19,6 +19,7 @@ protocol that is easy to implement and suitable for low powered devices.
 
 from gevent import monkey
 monkey.patch_all()
+import gevent
 from gevent.select import select as block_select
 from gevent import sleep as block_sleep
 
@@ -1524,8 +1525,7 @@ class Client(object):
             return MQTT_ERR_INVAL
 
         self._thread_terminate = False
-        self._thread = threading.Thread(target=self._thread_main)
-        self._thread.daemon = True
+        self._thread = gevent.Greenlet(self._thread_main)
         self._thread.start()
 
     def loop_stop(self, force=False):
@@ -1539,9 +1539,10 @@ class Client(object):
             return MQTT_ERR_INVAL
 
         self._thread_terminate = True
-        if threading.current_thread() != self._thread:
-            self._thread.join()
-            self._thread = None
+        # if threading.current_thread() != self._thread:
+        #     self._thread.join()
+        #     self._thread = None
+        self._thread.kill()
 
     @property
     def on_log(self):
