@@ -16,11 +16,16 @@
 This is an MQTT v3.1 client module. MQTT is a lightweight pub/sub messaging
 protocol that is easy to implement and suitable for low powered devices.
 """
+
+from gevent import monkey
+monkey.patch_all()
+from gevent.select import select as block_select
+from gevent import sleep as block_sleep
+
 import collections
 import errno
 import platform
 import random
-import select
 import socket
 
 try:
@@ -985,7 +990,7 @@ class Client(object):
         # call to publish() etc.
         rlist = [self._sock, self._sockpairR]
         try:
-            socklist = select.select(rlist, wlist, [], timeout)
+            socklist = block_select(rlist, wlist, [], timeout)
         except TypeError:
             # Socket isn't correct type, in likelihood connection is lost
             return MQTT_ERR_CONN_LOST
@@ -1130,9 +1135,9 @@ class Client(object):
         Must be called before connect() to have any effect.
         Requires a broker that supports MQTT v3.1.
 
-        username: The username to authenticate with. Need have no relationship to the client id. Must be unicode    
+        username: The username to authenticate with. Need have no relationship to the client id. Must be unicode
             [MQTT-3.1.3-11].
-        password: The password to authenticate with. Optional, set to None if not required. If it is unicode, then it 
+        password: The password to authenticate with. Optional, set to None if not required. If it is unicode, then it
             will be encoded as UTF-8.
         """
 
@@ -2668,7 +2673,7 @@ class Client(object):
                 and not self._thread_terminate
                 and remaining > 0):
 
-            time.sleep(min(remaining, 1))
+            block_sleep(min(remaining, 1))
             remaining = target_time - time_func()
 
 
